@@ -20,7 +20,8 @@ struct DB {
     /* Public API */
 	int fileDescriptor; /* File descriptor is associated with database */
 	struct BTREE *root; /* Root of btree */
-	int freeOffset;
+	int freeOffset; /*Position in file where we can write new node*/
+	int t; /* Degree of tree nodes */
     int (*close)(const struct DB *db);
     int (*del)(const struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);

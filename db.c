@@ -53,8 +53,12 @@ int writeInFile(DB *db, BTREE * node) {
 	return 0;
 }
 
-int readFromFile(DB *db, BTREE * node, int offsetRead) {
-	
+BTREE *readFromFile(DB *db, int offsetRead) {
+	if (lseek(db->fileDescriptor, offsetRead, 0)) { /* Move to the position which is needed to read */
+		return NULL;
+	}
+
+	BTREE * newNode = allocateNode(db->t);
 }
 
 
@@ -73,6 +77,7 @@ DB *dbcreate(const char *file, const DBC *conf) {
 	BTREE *tempPtr = newDB->root; /* It's a temporary pointer to B-tree root that is stored in database */
 	int numOfBlocks = (int)(conf->chunk_size / (KEY_SIZE + VALUE_SIZE)); /* Number of blocks in one node */
 	newDB->freeOffset = 0;
+	newDB->t = numOfBlocks;
 
 	tempPtr = allocateNode(numOfBlocks); /* Allocate memory for the root node that will be always stored in RAM */
 	
