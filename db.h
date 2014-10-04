@@ -1,11 +1,13 @@
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define KEY_SIZE 4
-#define VALUE_SIZE 8
+#define MAX_SIZE_KEY 16
+#define MAX_SIZE_VALUE 16
 #define OFFSET_SIZE 4
 
 typedef char byte;
@@ -18,10 +20,6 @@ struct DBT {
 
 struct DB {
     /* Public API */
-	int fileDescriptor; /* File descriptor is associated with database */
-	struct BTREE *root; /* Root of btree */
-	int freeOffset; /*Position in file where we can write new node*/
-	int t; /* Degree of tree nodes */
     int (*close)(const struct DB *db);
     int (*del)(const struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);
@@ -29,12 +27,32 @@ struct DB {
     int (*sync)(const struct DB *db);
 }; /* Need for supporting multiple backends (HASH/BTREE) */
 
+struct DB_IMPL {
+	int (*close)(const struct DB *db);
+    int (*del)(const struct DB *db, const struct DBT *key);
+    int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);
+    int (*put)(const struct DB *db,  struct DBT *key, const struct DBT *data);
+    int (*sync)(const struct DB *db);
+
+	int fileDescriptor; /* File descriptor which is associated with database */
+	struct BTREE *root; /* Root of btree */
+	size_t t; /* Degree of tree nodes */
+	byte *mask; // Mask for searching free blocks
+	byte *buf;
+	size_t curNumOfBlocks;
+	size_t numOfBlocks;
+	size_t chunkSize; // Configutaion information for DB
+	size_t dbSize;
+	
+};
+
 struct BTREE {
-	int n; /* Number of keys */
-	byte leaf; /* Is this node a leaf? */
+	size_t n; /* Number of keys */
+	size_t selfOffset;
+	size_t leaf; /* Is this node a leaf? */
+	size_t *offsetsChildren; /* Offsets of nodes in file */
 	struct DBT *keys; /* Keys */
-	struct DBT *values;
-	int *offsets; /* Offsets of nodes in file */
+ 	struct DBT *values;
 };
 
 struct DBC {
@@ -49,6 +67,6 @@ struct DBC {
         size_t mem_size;
 };
 
-struct DB *dbcreate(const char *file, const struct DBC *conf);
+struct DB_IMPL *dbcreate(const char *file, const struct DBC *conf);
 struct DB *dbopen(const char *file);
 
