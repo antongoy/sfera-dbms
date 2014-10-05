@@ -17,14 +17,15 @@ BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 	read(db->fileDescriptor, db->buf, db->chunkSize);
 
 	byte * ptr = db->buf;
-	memcpy(&db->root->selfOffset, ptr, sizeof(size_t));
+	memcpy(&newNode->selfOffset, ptr, sizeof(size_t));
+    printf("read: %lu\n", *((size_t *)ptr));
 	ptr += sizeof(size_t);
-	memcpy(&db->root->leaf, ptr, sizeof(size_t));
+	memcpy(&newNode->leaf, ptr, sizeof(size_t));
 	ptr += sizeof(size_t);
-	memcpy(&db->root->n, ptr, sizeof(size_t));
-	ptr += sizeof(size_t);
-	memcpy(db->root->offsetsChildren, ptr, sizeof(size_t)*(2*db->t));
-	
+	memcpy(&newNode->n, ptr, sizeof(size_t));
+    ptr += sizeof(size_t);
+	memcpy(newNode->offsetsChildren, ptr, sizeof(size_t)*(2*db->t));
+	ptr +=  sizeof(size_t)*(2*db->t);
 	int n = 2*db->t - 1;
 
 	for(i = 0; i < n; i++) {
@@ -107,8 +108,8 @@ BTREE* allocateNode(DB_IMPL * db, size_t leaf) {
 	root->values = (DBT *)malloc(sizeof(DBT)*(2*db->t - 1));
 	size_t i, n = 2*db->t - 1;
 	for (i = 0; i < n; i++) {
-		root->values[i].size = MAX_SIZE_VALUE/2;
-		root->keys[i].size = MAX_SIZE_KEY/2;
+		root->values[i].size = 0;
+		root->keys[i].size = 0;
 		root->values[i].data = (byte *)malloc(sizeof(byte)*MAX_SIZE_VALUE/2);
 		root->keys[i].data = (byte *)malloc(sizeof(byte)*MAX_SIZE_KEY/2);
 	}
@@ -219,7 +220,7 @@ void print_statistics(DB_IMPL *db) {
 	printf("\n");
     printf("Keys in root = ");
     for(i = 0; i < db->root->n; i++) {
-        printf("%lu ", *((size_t *)(db->root->keys[i].data)));
+        printf("%lu ", *((size_t *)db->root->keys[i].data));
     }
     printf("\n");
 }
@@ -331,8 +332,10 @@ int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 		writeInFile(db, temp);
 		s->offsetsChildren[0] = temp->selfOffset;
 		writeInFile(db, s);
-		splitChild(db, s, temp, 0);
-		insertNonfullNode(db, s, key, value); 
+		BTREE *t = splitChild(db, s, temp, 0);
+		insertNonfullNode(db, s, key, value);
+        freeNode(t);
+        freeNode(s);
 	} else {
         printf("\tIn else............\n ");
 		insertNonfullNode(db, temp, key, value);
