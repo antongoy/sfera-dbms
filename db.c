@@ -12,10 +12,8 @@ BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 	size_t i;
 	BTREE * newNode = allocateNode(db, 1);
 	
-	if(lseek(db->fileDescriptor, offset, 0)) {
-		return NULL;
-	}
-	
+	lseek(db->fileDescriptor, offset, 0);
+
 	read(db->fileDescriptor, db->buf, db->chunkSize);
 
 	byte * ptr = db->buf;
@@ -55,20 +53,17 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 		node->selfOffset = i * db->chunkSize + db->numOfBlocks + db->chunkSize; 
 		int offsetInMetadate = sizeof(size_t) + sizeof(int) + sizeof(size_t); 
 
-		if (lseek(db->fileDescriptor, 0, 0)) {
-			return -1;
-		}
+		lseek(db->fileDescriptor, 0, 0);
 		write(db->fileDescriptor, db->curNumOfBlocks, sizeof(size_t));
 			
 		offsetInMetadate = db->chunkSize;
-		offsetInMetadate += node->selfOffset / db->chunkSize;
+		offsetInMetadate += i;
 
-		if (lseek(db->fileDescriptor, offsetInMetadate, 0)) {
-			return -1;
-		}
+		lseek(db->fileDescriptor, offsetInMetadate, 0);
 		byte temp = 1;
 		byte *tempPtr = &temp;  
 		write(db->fileDescriptor, tempPtr, sizeof(byte));
+        db->mask[i] = 1;
 	}
 	byte *ptr = db->buf;
 	memcpy(ptr, &node->selfOffset, sizeof(size_t));
@@ -94,10 +89,7 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 	}
 
 
-	if (lseek(db->fileDescriptor, node->selfOffset, 0)) {
-		return -1;
-	}
-
+	lseek(db->fileDescriptor, node->selfOffset, 0);
 	write(db->fileDescriptor, db->buf, db->chunkSize);		
 
 	return 0;
@@ -149,6 +141,7 @@ struct DB_IMPL* dbcreate(const char *file, const struct DBC *conf) {
 	newDB->curNumOfBlocks = 0;
 	newDB->chunkSize = conf->chunk_size;
 	newDB->dbSize = conf->db_size;
+
 	
 	newDB->buf = (byte *)malloc(sizeof(byte)*conf->chunk_size);
 
@@ -166,6 +159,7 @@ struct DB_IMPL* dbcreate(const char *file, const struct DBC *conf) {
 	write(newDB->fileDescriptor, metaData, sizeof(size_t)*3);
 	
 	newDB->root = allocateNode(newDB, 1);
+    newDB->root->selfOffset = -1;
 	newDB->curNumOfBlocks++;
 	
 	writeInFile(newDB, newDB->root);
@@ -211,18 +205,27 @@ DB* dbopen (const char *file) {
 }
 
 void print_statistics(DB_IMPL *db) {
+    int i;
 	printf("\nDatabase information:\n");
 	printf("---------------------------------------------\n");
 	printf("CurNumOfBlocks = %lu\n", db->curNumOfBlocks);
 	printf("NumOfBlocks = %lu\n", db->numOfBlocks);
 	printf("ChunkSize = %lu\n", db->chunkSize);
 	printf("t = %lu\n", db->t);
-	
+    printf("Bitmask = ");
+    for(i = 0; i < 10; i++) {
+        printf("%d", db->mask[i]);
+    }
+	printf("\n");
+    printf("Keys in root = ");
+    for(i = 0; i < db->root->n; i++) {
+        printf("%lu ", *((size_t *)(db->root->keys[i].data)));
+    }
+    printf("\n");
 }
 
-void splitChild(DB_IMPL *db, BTREE *x, size_t i) {
+BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 	BTREE *z = allocateNode(db, 1);
-	BTREE *y = readFromFile(db, x->offsetsChildren[i]);
 	size_t j;
 	z->leaf = y->leaf;
 	z->n = db->t - 1;
@@ -250,13 +253,75 @@ void splitChild(DB_IMPL *db, BTREE *x, size_t i) {
 	x->n++;
 	writeInFile(db, y);
 	writeInFile(db, x);
+    return z;
 }
 
-void insertNonfullNode(DB_IMPL *db, BTREE *node, DBT *key, DBT *value) {}
+void freeNode (BTREE *node) {
+    int i;
+    for (i = 0; i < node->n; i++) {
+        free(node->values[i].data);
+        free(node->keys[i].data);
+    }
+    free(node->keys);
+    free(node->values);
+    free(node->offsetsChildren);
+}
+
+void insertNonfullNode(DB_IMPL *db, BTREE *x, DBT *key, DBT *value) {
+    printf("\tIn insertNonfullNode...........\n");
+	size_t i = x->n;
+    printf("\t\tNumber of keys in X - %lu\n", x->n);
+    printf("\t\tInitial value of i - %lu\n", i);
+    if (x->leaf) {
+        printf("\t\tIn if.........\n\t\tNode X is leaf.......\n");
+        if (x->n == 0) {
+            printf("\t\tNode is empty...........\n");
+            memcpy(x->keys[0].data, key->data, MAX_SIZE_KEY/2);
+        } else {
+            size_t newKey = *((size_t *) key->data);
+            size_t keyInNode = *((size_t *) x->keys[i-1].data);
+            while (i >= 1 && newKey < keyInNode) {
+                size_t keyInNode = *((size_t *) x->keys[i-1].data);
+                memcpy(x->keys[i].data, x->keys[i-1].data, MAX_SIZE_KEY / 2);
+                i--;
+
+            }
+            memcpy(x->keys[i].data, key->data, MAX_SIZE_KEY / 2);
+        }
+        x->n ++;
+        printf("\t\tRoot offset = %lu\n", x->selfOffset);
+        writeInFile(db, x);
+    } else {
+        size_t newKey = *((size_t *) key->data);
+        size_t keyInNode = *((size_t *) x->keys[i-1].data);
+        while (i >= 0 && newKey < keyInNode) {
+            i--;
+            newKey = *((size_t *) key->data);
+            keyInNode = *((size_t *) x->keys[i-1].data);
+        }
+        //i++;
+        BTREE *child = readFromFile(db, x->offsetsChildren[i]);
+        if (child->n == 2*db->t - 1) {
+            BTREE *newChild = splitChild(db, x, child, i);
+            if (*((size_t *)key->data) > *((size_t *)x->keys[i].data)) {
+                insertNonfullNode(db, newChild, key, value);
+            } else {
+                insertNonfullNode(db, child, key, value);
+            }
+            freeNode(newChild);
+            freeNode(child);
+
+        }
+
+    }
+}
 
 int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 	BTREE *temp = db->root;
-	if(db->root->n = 2*db->t - 1) {
+    printf("\nIn insertNode...........\n");
+    printf("\tNumber of keys in root - %lu\n", db->root->n);
+	if (db->root->n == 2*db->t - 1) {
+        printf("In if............\n ");
 		BTREE *s = allocateNode(db, 1);
 		db->root = s;
 		s->leaf = 0;
@@ -266,11 +331,13 @@ int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 		writeInFile(db, temp);
 		s->offsetsChildren[0] = temp->selfOffset;
 		writeInFile(db, s);
-		splitChild(db, s, 0);
+		splitChild(db, s, temp, 0);
 		insertNonfullNode(db, s, key, value); 
 	} else {
+        printf("\tIn else............\n ");
 		insertNonfullNode(db, temp, key, value);
 	}
+    printf("Out from insertNode.........\n");
 }
 
 int main (void) {
@@ -278,6 +345,30 @@ int main (void) {
 	conf.db_size = 512 * 1024 * 1024;
 	conf.chunk_size = 4096;
 	conf.mem_size = 16 * 1024 * 1024;
-	struct DB_IMPL * myDB = dbcreate("database.db", &conf); 
+	struct DB_IMPL * myDB = dbcreate("database.db", &conf);
+    DBT key;
+    DBT value;
+    int i = 0;
+    key.data = (size_t *)malloc(sizeof(size_t));
+    size_t k = 12;
+    memcpy(key.data, &k, sizeof(size_t));
+    key.size = MAX_SIZE_KEY;
+    value.data = (size_t *)malloc(sizeof(size_t));
+    value.size = MAX_SIZE_VALUE;
+    printf("Before insertNode.......\n");
+    insertNode(myDB, &key, &value);
+    k = 10;
+    memcpy(key.data, &k, sizeof(size_t));
+    insertNode(myDB, &key, &value);
+    k = 4;
+    memcpy(key.data, &k, sizeof(size_t));
+    insertNode(myDB, &key, &value);
 	print_statistics(myDB);
+    BTREE *test = readFromFile(myDB, (1+myDB->numOfBlocks)*myDB->chunkSize);
+    printf("All ok\n");
+    printf("\nN = %lu\n", test->n);
+    for (i = 0; i < test->n; i++) {
+        printf("%lu ", *((size_t *)test->keys[i].data));
+    }
+
 }
