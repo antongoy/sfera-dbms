@@ -5,9 +5,10 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #define MAX_SIZE_KEY 16
-#define MAX_SIZE_VALUE 16
+#define MAX_SIZE_VALUE 112
 #define OFFSET_SIZE 4
 
 typedef char byte;
@@ -34,7 +35,7 @@ struct DB_IMPL {
     int (*put)(const struct DB *db,  struct DBT *key, const struct DBT *data);
     int (*sync)(const struct DB *db);
 
-	int fileDescriptor; /* File descriptor which is associated with database */
+	size_t fileDescriptor; /* File descriptor which is associated with database */
 	struct BTREE *root; /* Root of btree */
 	size_t t; /* Degree of tree nodes */
 	byte *mask; // Mask for searching free blocks
@@ -67,6 +68,6 @@ struct DBC {
         size_t mem_size;
 };
 
-struct DB_IMPL *dbcreate(const char *file, const struct DBC *conf);
+struct DB *dbcreate(const char *file, const struct DBC *conf);
 struct DB *dbopen(const char *file);
 
