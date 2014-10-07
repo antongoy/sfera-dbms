@@ -10,6 +10,7 @@
 #define MAX_SIZE_KEY 16
 #define MAX_SIZE_VALUE 112
 #define OFFSET_SIZE 4
+#define MIN(a,b) ((a)>(b)?(b):(a))
 
 typedef char byte;
 
@@ -29,7 +30,7 @@ struct DB {
 }; /* Need for supporting multiple backends (HASH/BTREE) */
 
 struct DB_IMPL {
-	int (*close)(const struct DB *db);
+    int (*close)(const struct DB *db);
     int (*del)(const struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);
     int (*put)(const struct DB *db,  struct DBT *key, const struct DBT *data);
@@ -66,6 +67,11 @@ struct DBC {
         /* Maximum memory size */
         /* 16MB by default */
         size_t mem_size;
+};
+
+struct BTREE_POS {
+    struct BTREE *node;
+    size_t pos;
 };
 
 struct DB *dbcreate(const char *file, const struct DBC *conf);
