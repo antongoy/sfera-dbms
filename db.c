@@ -10,7 +10,7 @@ typedef struct BTREE_POS BTREE_POS;
 BTREE* readFromFile(DB_IMPL *db, size_t offset);
 BTREE* allocateNode(size_t t, size_t leaf);
 int writeInFile (DB_IMPL *db, BTREE *node);
-void freeNode(BTREE *node);
+void freeNode(DB_IMPL *db, BTREE *node);
 void print_node (BTREE *x);
 
 
@@ -19,10 +19,16 @@ BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 	BTREE *newNode = allocateNode(db->t, 1);
 
 	//Move to start position of node
-	lseek(db->fileDescriptor, offset, 0);
+	if (lseek(db->fileDescriptor, offset, 0) < 0) {
+		fprintf(stderr, "In readFromFile function: lseek() error\n");
+		return NULL;
+	}
 
 	//Read to buffer
-	read(db->fileDescriptor, db->buf, db->chunkSize);
+	if(read(db->fileDescriptor, db->buf, db->chunkSize) != db->chunkSize) {
+		fprintf(stderr, "In readFromFile function: read() error\n");
+		return NULL;
+	}
 
 	//Parse the buffer. Metadata
 	byte * ptr = db->buf;
@@ -47,6 +53,7 @@ BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 		memcpy(&newNode->values[i].size, ptr, sizeof(size_t));
 		ptr += sizeof(size_t);
 		memcpy(newNode->values[i].data, ptr, MAX_SIZE_VALUE - sizeof(size_t));
+		ptr += MAX_SIZE_VALUE - sizeof(size_t);
 	}
 	
 	return newNode;
@@ -76,7 +83,7 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 			return -1;
 		}
 
-		if (write(db->fileDescriptor, db->curNumOfBlocks, sizeof(size_t)) != -1) {
+		if (write(db->fileDescriptor, &db->curNumOfBlocks, sizeof(size_t)) != sizeof(size_t)) {
 			fprintf(stderr, "In function writeInFile: System call write() generated the error\n");
 			return -1;
 		}
@@ -100,31 +107,33 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 	}
 
 	//Auxiliary pointer 'ptr' for copying data in 'buf'
-	byte *ptr = db->buf;
-
+	//byte *ptr = db->buf;
+	size_t k = 0;
+	memset(db->buf, 0, db->chunkSize);
 	//Copy header with block metadata
-	memcpy(ptr, &node->selfOffset, sizeof(size_t));
-
-	ptr += sizeof(size_t);
-	memcpy(ptr, &node->leaf, sizeof(size_t));
-	ptr += sizeof(size_t);
-	memcpy(ptr, &node->n, sizeof(size_t));
-	ptr += sizeof(size_t);
+	memcpy(db->buf + k, &(node->selfOffset), sizeof(size_t));
+	k += sizeof(size_t);
+	memcpy(db->buf + k, &(node->leaf), sizeof(size_t));
+	k += sizeof(size_t);
+	memcpy(db->buf + k, &(node->n), sizeof(size_t));
+	k += sizeof(size_t);
 
 	//Copy 'offsetsChildren'
-	memcpy(ptr, node->offsetsChildren, sizeof(size_t)*(2*db->t));
-	ptr += sizeof(size_t)*(2*db->t);
+	int n = 2*db->t;
+	memcpy(db->buf + k, node->offsetsChildren, sizeof(size_t)*n);
+	k += sizeof(size_t) * n;
 
 	//Copy 'keys' and 'values'
-	int n = 2*db->t - 1;
-	for(i = 0; i < n; i++) {
-		memcpy(ptr, &node->keys[i].size, sizeof(size_t));
-		ptr += sizeof(size_t);
-		memcpy(ptr, node->keys[i].data, MAX_SIZE_KEY - sizeof(size_t));
-		ptr += MAX_SIZE_KEY - sizeof(size_t);
-		memcpy(ptr, &node->values[i].size, sizeof(size_t));
-		ptr += sizeof(size_t);
-		memcpy(ptr, node->values[i].data, MAX_SIZE_VALUE - sizeof(size_t));
+	
+	for(i = 0; i < n - 1; i++) {
+		memcpy(db->buf + k, &(node->keys[i].size), sizeof(size_t));
+		k += sizeof(size_t);
+		memcpy(db->buf + k, node->keys[i].data, MAX_SIZE_KEY - sizeof(size_t));
+		k += MAX_SIZE_KEY - sizeof(size_t);
+		memcpy(db->buf + k, &(node->values[i].size), sizeof(size_t));
+		k += sizeof(size_t);
+		memcpy(db->buf + k, node->values[i].data, MAX_SIZE_VALUE - sizeof(size_t));
+		k +=  MAX_SIZE_VALUE - sizeof(size_t);
 	}
 
 	//Write in file node
@@ -133,7 +142,7 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 		return -1;
 	}
 
-	if(write(db->fileDescriptor, db->buf, db->chunkSize) == -1) {
+	if(write(db->fileDescriptor, db->buf, db->chunkSize) != db->chunkSize) {
 		fprintf(stderr, "In function writeInFile: System call write() generated the error\n");
 		return -1;
 	}
@@ -151,6 +160,7 @@ BTREE* allocateNode(size_t t, size_t leaf) {
 	root->leaf = leaf;
 
 	root->offsetsChildren = (size_t *)malloc(sizeof(size_t)*n);
+	memset(root->offsetsChildren, 0, sizeof(size_t)*n);
 	root->keys = (DBT *)malloc(sizeof(DBT)*(n - 1));
 	root->values = (DBT *)malloc(sizeof(DBT)*(n - 1));
 
@@ -158,21 +168,24 @@ BTREE* allocateNode(size_t t, size_t leaf) {
 		root->values[i].size = 0;
 		root->keys[i].size = 0;
 		root->values[i].data = (byte *)malloc(sizeof(byte)*(MAX_SIZE_VALUE - sizeof(size_t)));
+		memset(root->values[i].data, 0, sizeof(byte)*(MAX_SIZE_VALUE - sizeof(size_t)));
 		root->keys[i].data = (byte *)malloc(sizeof(byte)*(MAX_SIZE_KEY - sizeof(size_t)));
+		memset(root->keys[i].data, 0, sizeof(byte)*(MAX_SIZE_KEY - sizeof(size_t)));
 	}
 	return root;
 } 
 
 struct DB* dbcreate(const char *file, const struct DBC *conf) {
-	size_t fd, i;
+	long fd; 
+	size_t i;
 
-	if ((fd = open(file, O_CREAT|O_RDWR|O_TRUNC,0)) == -1) {
+	if ((fd = open(file, O_CREAT|O_RDWR|O_TRUNC,  S_IRWXU)) < 0) {
 		fprintf(stderr, "In dbcreate function: Impossible creating new file\n");
 		return NULL;
 	}
 
 	//Allocate memory for new Database
-	DB_IMPL * newDB = (struct DB_IMPL *)malloc(sizeof(struct DB_IMPL));
+	DB_IMPL * newDB = (DB_IMPL *)malloc(sizeof(DB_IMPL));
 
 	//Fill simple fields in newDB structure
 	newDB->fileDescriptor = fd;
@@ -190,16 +203,12 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 	newDB->numOfBlocks = m * conf->chunk_size;
 
 	//Allocate memory for bit mask - it shows free spaces in file
-	newDB->mask = (byte *)malloc(conf->chunk_size * m);
+	newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks);
+	memset(newDB->mask, 0, newDB->numOfBlocks);
 	
-	//At  the initial moment in mask all bits is zero
-	for(i = 0; i < m; i++) {
-		newDB->mask[i] = 0;
-	}
-
 	//Memory for auxiliary buffer. It is needed for writing in file
-	newDB->buf = (byte *)malloc(sizeof(byte)*conf->chunk_size);
-
+	newDB->buf = (byte *)malloc(sizeof(byte) * newDB->chunkSize);
+	memset(newDB->buf, 0, newDB->chunkSize);
 	//Move to start of file
 	if (lseek(newDB->fileDescriptor, 0, 0) == -1) {
 		fprintf(stderr, "In dbcreate function: system call lseek throws the error\n");
@@ -207,18 +216,22 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 	}
 
 	//'metaData' is auxiliary buffer for database metadata
-	size_t * metaData = (size_t *)malloc(sizeof(size_t)*3);
-	size_t *p = metaData;
+	size_t *metaData = (size_t *)malloc(DB_HEADER_SIZE);
+	//size_t *p = metaData;
 
 	//Copy to buffer database metadata
-	memcpy(p, &(newDB->curNumOfBlocks), sizeof(size_t));
-	p += sizeof(size_t);
-	memcpy(p, &(newDB->t), sizeof(size_t));
-	p += sizeof(size_t);    
-	memcpy(p, &(newDB->chunkSize), sizeof(size_t));
-
+	size_t k = 0;
+	memcpy(metaData + k, &(newDB->curNumOfBlocks), sizeof(size_t));
+	k ++;
+	memcpy(metaData + k, &(newDB->t), sizeof(size_t));
+	k ++;    
+	memcpy(metaData + k, &(newDB->chunkSize), sizeof(size_t));
+	k ++; 
+	memcpy(metaData + k, &(newDB->numOfBlocks), sizeof(size_t));
+	
+	
 	//Write in file database metadata
-	if(write(newDB->fileDescriptor, metaData, sizeof(size_t)*3) == -1) {
+	if(write(newDB->fileDescriptor, metaData, DB_HEADER_SIZE) != DB_HEADER_SIZE) {
 		fprintf(stderr, "In dbcreate function: system call write() throws the error\n");
 		return NULL;
 	}
@@ -242,9 +255,10 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 }
 
 DB* dbopen (const char *file) {
-	size_t fd, i;
+	 long fd; 
+	 size_t i;
 	
-	if (fd = open(file, O_RDWR | O_APPEND, 0)) {
+	if ((fd = open(file, O_RDWR, S_IRWXU)) == -1) {
 		fprintf(stderr, "In dbopen function: imposible open database\n");
 		return NULL;
 	}
@@ -259,38 +273,48 @@ DB* dbopen (const char *file) {
 	newDB->fileDescriptor = fd;
 
 	//Metadata buffer for database header
-	size_t *metaData = (size_t *)malloc(2 * sizeof(size_t) + sizeof(int));
+	size_t *metaData = (size_t *)malloc(DB_HEADER_SIZE);
 	if (metaData == NULL) {
 		fprintf(stderr, "In dbopen function: Memory wasn't allocated for metaData\n");
 		return NULL;
 	}
 	
-	if (read(newDB->fileDescriptor, metaData,  2 * sizeof(size_t) + sizeof(int)) == -1) {
+	if (lseek(newDB->fileDescriptor, 0, 0) < 0) {
+		fprintf(stderr, "In dbopen function: lseek() error\n");
+		return NULL;
+	}
+	
+	if (read(newDB->fileDescriptor, metaData,  DB_HEADER_SIZE) !=  DB_HEADER_SIZE) {
 		fprintf(stderr, "In dbopen function: imposible read data\n");
 		return NULL;
 	}
 
 	//Parse metadata
-	size_t *ptr = metaData;
-	memcpy(&newDB->curNumOfBlocks, ptr, sizeof(size_t));
-	ptr += sizeof(size_t);
-	memcpy(&newDB->t, ptr, sizeof(size_t));
-	ptr += sizeof(size_t);
-	memcpy(&newDB->chunkSize, ptr, sizeof(size_t));
+	size_t k = 0;
+	memcpy(&(newDB->curNumOfBlocks), metaData + k, sizeof(size_t));
+	k++;
+	memcpy(&(newDB->t), metaData + k, sizeof(size_t));
+	k++;
+	memcpy(&(newDB->chunkSize), metaData + k, sizeof(size_t));
+	k++;
+	memcpy(&(newDB->numOfBlocks), metaData + k, sizeof(size_t));
 
 	//Allocate memory
 	newDB->buf = (byte *)malloc(sizeof(byte)*newDB->chunkSize);
+	memset(newDB->buf, 0, newDB->chunkSize);
 	if (newDB->buf == NULL) {
 		fprintf(stderr, "In dbopen function: : Memory wasn't allocated for newDB->buf\n");
+		return NULL;
 	}
 	
-	newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks);    
+	newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks); 
+	memset(newDB->buf, 0, newDB->chunkSize);   
 	if (newDB->mask == NULL) {
 		fprintf(stderr, "In dbopen function: : Memory wasn't allocated for newDB->mask\n");
+		return NULL;
 	}
-	
 	int m = newDB->numOfBlocks / newDB->chunkSize;
-
+	
 	//Read bit mask from file
 	byte * p = newDB->mask;
 
@@ -347,29 +371,31 @@ void print_statistics(DB_IMPL *db) {
 }
 
 void print_node (BTREE *x) {
-	int i, numCol = 5;
-	printf("\t------ Node information ------\n\n");
+	int i, numColKeys = 5, numColValue = 2;
+	printf("\n\t------ Node information ------\n\n");
 	printf("--- Offset of node in file: %lu\n", x->selfOffset);
 	printf("--- Number of keys in  node: %lu\n", x->n);
 	printf("--- Leaf flag: %lu\n", x->leaf);
 	printf("--- Keys in node: \n");
+	
 	int j = 0;
 	for(i = 0; i < x->n; i++, j++) {
-		if (j == numCol) {
+		if (j == numColKeys) {
 		 printf("\n");
 		 j = 0;
 		}
 		printf("%2d->%2lu  ", i, *((size_t *)x->keys[i].data));
 	}
+	
 	j=0;
 	printf("\n--- Values: \n");
 	
 	for(i = 0; i < x->n; i++, j++) {
-		if (j == numCol) {
+		if (j == numColValue) {
 			printf("\n");
 			j = 0;
 		}
-		printf("%2d->%s  ", i, (char *)x->values[i].data);
+		printf("%2d----%s  ", i, (char *)(x->values[i].data));
 	}
 	printf("\n");
 }
@@ -381,7 +407,6 @@ void dbtcpy(DBT *data1, DBT *data2) {
 
 BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 	long j;
-
 	//Create new node
 	BTREE *z = allocateNode(db->t, 1);
 
@@ -392,17 +417,17 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 
 	//Copy second part of y to z ++++++++++++
 	for(j = 0; j < db->t-1; j++) {
-		dbtcpy(&z->keys[j], &y->keys[j+db->t]);
-		dbtcpy(&z->values[j], &y->values[j+db->t]);
+		dbtcpy(&(z->keys[j]), &(y->keys[j+db->t]));
+		dbtcpy(&(z->values[j]), &(y->values[j+db->t]));
 	}
-
+	
 	//If not leaf then copy offsetsChildren ++++++++++
 	if(!y->leaf) {
 		for(j = 0; j < db->t; j++) {
 			z->offsetsChildren[j] = y->offsetsChildren[j+db->t];
 		}
 	}
-
+	
 	//Set new size of y node
 	y->n = db->t - 1;
 
@@ -412,10 +437,10 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 	}
 
 	//Write
+	db->curNumOfBlocks++;
 	writeInFile(db, z);
-	   db->curNumOfBlocks++;
 	x->offsetsChildren[i+1] = z->selfOffset;
-
+	
 	//Make place for new key and value ++++++
 	for (j = x->n; j > i; j--) {
 		dbtcpy(&x->keys[j], &x->keys[j-1]);
@@ -430,18 +455,20 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 
 	writeInFile(db, y);
 	writeInFile(db, x);
+
 	return z;
 }
 
-void freeNode (BTREE *node) {
+void freeNode (DB_IMPL *db, BTREE *node) {
 	int i;
-	for (i = 0; i < node->n; i++) {
+	for (i = 0; i < 2*db->t - 1; i++) {
 		free(node->values[i].data);
 		free(node->keys[i].data);
 	}
 	free(node->keys);
 	free(node->values);
 	free(node->offsetsChildren);
+	free(node);
 
 }
 
@@ -460,24 +487,25 @@ int memcmpwrapp2 (DBT *value1, DBT *value2) {
 		return 0;
 	}
 }
+
 void insertNonfullNode(DB_IMPL *db, BTREE *x, DBT *key, DBT *value) {
 	long i = x->n;
 
 	if (x->leaf) {
 		if (x->n == 0) {
-			dbtcpy(&x->keys[0], key);
-			dbtcpy(&x->values[0], value);
+			dbtcpy(&(x->keys[0]), key);
+			dbtcpy(&(x->values[0]), value);
 		} else {
-			while (memcmpwrapp2(key, &x->keys[i-1]) < 0) {
-				dbtcpy(&x->keys[i], &x->keys[i-1]);
-				dbtcpy(&x->values[i], &x->values[i-1]);
+			while (memcmpwrapp2(key, &(x->keys[i-1])) < 0) {
+				dbtcpy(&(x->keys[i]), &(x->keys[i-1]));
+				dbtcpy(&(x->values[i]), &(x->values[i-1]));
 				i--;
 				if (!i) {
 					break;
 				}
 			}
-			dbtcpy(&x->keys[i], key);
-			dbtcpy(&x->values[i], value);
+			dbtcpy(&(x->keys[i]), key);
+			dbtcpy(&(x->values[i]), value);
 		}
 		
 		x->n++;
@@ -501,18 +529,18 @@ void insertNonfullNode(DB_IMPL *db, BTREE *x, DBT *key, DBT *value) {
 			} else {
 				insertNonfullNode(db, child, key, value);
 			}
-			freeNode(newChild);
+			freeNode(db, newChild);
 		} else {
 			insertNonfullNode(db, child, key, value);
 		}
-		freeNode(child);
+		freeNode(db,child);
 	}
 }
 
 int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 	BTREE *temp = db->root;
 
-	if (db->root->n == 2*db->t - 1) {
+	if (temp->n == 2*db->t - 1) {
 		BTREE *s = allocateNode(db->t, 1);
 		db->root = s;
 		db->root->leaf = 0;
@@ -521,52 +549,60 @@ int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 		temp->selfOffset = -1;
 		writeInFile(db, temp);
 		db->root->offsetsChildren[0] = temp->selfOffset;
-		writeInFile(db, db->root);
 		db->curNumOfBlocks++;
+		writeInFile(db, db->root);
 		BTREE *t = splitChild(db, db->root, temp, 0);
+		freeNode(db, temp);
 		insertNonfullNode(db, s, key, value);
-		freeNode(t);
+			print_node(t);
+
+		freeNode(db,t);
 	} else {
 		insertNonfullNode(db, temp, key, value);
 	}
 }
 
-BTREE_POS* searchInTreeInside(DB_IMPL *db, BTREE *x, DBT *key) {
+int searchInTreeInside(DB_IMPL *db, BTREE *x, DBT *key, DBT *value) {
 	long i = 0;
 	while (i <= x->n-1 && memcmpwrapp2(key, &x->keys[i]) > 0) {
 		i++;
 	}
 	
 	if (i>=0 && i <= x->n-1 && memcmpwrapp2(key, &x->keys[i]) == 0) {
-		BTREE_POS *result = (BTREE_POS *)malloc(sizeof(BTREE_POS));
-		result->node = x;
-		result->pos = i;
-		return result;
+		dbtcpy(value, &(x->values[i]));
+		if (x != db->root) {
+			freeNode(db,x);
+		}
+		return 0;
 	} else {
 		if (x->leaf) {
-			return NULL;
+			if (x != db->root) {
+				freeNode(db,x);
+			}
+			return -1;
 		} else {
 			
 			BTREE *newNode = readFromFile(db, x->offsetsChildren[i]);
 			if (x != db->root) {
-				freeNode(x);
+				freeNode(db,x);
 			}
-			return searchInTreeInside(db, newNode, key);
+			return searchInTreeInside(db, newNode, key, value);
 		}
 	}
 }
 
-BTREE_POS* searchInTree(DB_IMPL *db, DBT *key) {
-   return searchInTreeInside(db, db->root, key );
+int searchInTree(DB_IMPL *db, DBT *key, DBT *value) {
+   return searchInTreeInside(db, db->root, key, value);
 }
 
 int dbclose (DB *dbForClosing) {
 	DB_IMPL *db = (DB_IMPL *)dbForClosing;
-	freeNode(db->root);
+	freeNode(db, db->root);
 	free(db->mask);
 	free(db->buf);
 	close(db->fileDescriptor);
 	free(db);
+	return 0;
 }
 
 void printBTREE (DB_IMPL *db, BTREE *x) {
@@ -580,7 +616,7 @@ void printBTREE (DB_IMPL *db, BTREE *x) {
 		child = readFromFile(db, x->offsetsChildren[i]);
 		printf("\n\t ------ IT'S %lu CHILD --------\n", i);
 		print_node(child);
-		freeNode(child);
+		freeNode(db, child);
 	}
 	
 		for (i = 0; i <x->n+1; i++) {
@@ -590,14 +626,65 @@ void printBTREE (DB_IMPL *db, BTREE *x) {
 			if (!child->leaf) {
 			printBTREE(db, child);
 			}
-			freeNode(child);
+			freeNode(db,child);
 		}
 	
 		printf("\n\t--------- END OF TREE --------- \n\n\n");
 	
 }
 
-int main (void) {
+void valueGen(char * str, size_t size) {
+	size_t i;
+	
+	for (i = 0; i < size; i++) {
+		str[i] = 'a' + rand() % 26;
+	}
+	
+}
+
+int mainForDbopen(void) {
+	
+	struct DB_IMPL * db = (DB_IMPL *)dbopen("database.db");
+	if (db == NULL) {
+		fprintf(stderr, "Fatal error: imposible open database\n");
+		return -1;
+	}
+	
+	DBT key, value;
+	size_t k = 276355;
+	
+	key.data = (size_t *)malloc(sizeof(size_t));
+	key.size = sizeof(size_t);
+	
+	value.data = (byte *)malloc(10);
+	
+	memcpy(key.data, &k, sizeof(size_t)); 
+	
+	int g = searchInTree(db, &key, &value);
+	
+	if (g == -1) {
+		printf("There isn't key in this database\n");
+		dbclose((DB *)db);
+		free(key.data);
+		free(value.data);
+		return 0;
+	}
+	
+	printf("---- VALUE OF KEY %lu IS %s -----\n", k, (char *)value.data);
+	
+	free(key.data);
+	free(value.data);
+	
+	dbclose((DB *)db);
+	return 0;
+}
+
+int main (int argc, char **argv) {
+	if (argc == 2 && strcmp(argv[1], "open") == 0) {
+		mainForDbopen();
+		return 0;
+	} 
+	
 	printf("\n--------------------------------------------------\n");
 	printf("--------------- NEW RUN OF PROGRAM ---------------\n");
 	printf("--------------------------------------------------\n");
@@ -608,28 +695,28 @@ int main (void) {
 	conf.mem_size = 16 * 1024 * 1024;
 
 	struct DB_IMPL * myDB = (DB_IMPL *)dbcreate("database.db", &conf);
+	
 	if (myDB == NULL) {
 		fprintf(stderr, "Fatal error: imposible create database\n");
-		unlink("database.db");
 		return -1;
 	}
+	srand(time(NULL));
 	DBT key;
 	DBT value;
-	byte str[9] = "abcdefgh";
+	byte str[32];
 	size_t i, r, y;
 	
 	key.data = (size_t *)malloc(sizeof(size_t));
 	key.size = sizeof(size_t);
-	value.data = (byte *)malloc(9);
-	value.size = 9;
+	value.data = (byte *)malloc(32);
+	value.size = 32;
 	
-	srand ( time(NULL) );
-	for(i = 0; i < 1000; i++) {
+	for(i = 0; i < 30; i++) {
 		r = rand() % 1000000; 
 		if (i == 12) {
 			y = r;
-			printf("\tVALUEDATA: %s", (char *)value.data);
 		}
+		valueGen(str, 32);
 		memcpy(value.data, str, value.size);
 		memcpy(key.data, &r, key.size);
 		insertNode(myDB, &key, &value);
@@ -638,18 +725,19 @@ int main (void) {
 	print_statistics(myDB);
 	
 	memcpy(key.data, &y, key.size);
-	BTREE_POS *res = searchInTree(myDB, &key);
-	if (res == NULL) {
+	int h = searchInTree(myDB, &key, &value);
+	if (h == -1) {
 		printf("There isn't key in this database\n");
-		close(myDB->fileDescriptor);
-		    unlink("database.db");
+		dbclose((DB *)myDB);
 		return 0;
 	}
-	print_node(res->node);
-	printf("---- Key: %lu -----\n", y);
-	printf("---- Position in node: %lu -----\n", res->pos);
-	close(myDB->fileDescriptor);
-	unlink("database.db");
 	
+	printf("---- VALUE OF KEY %lu IS %s -----\n", y, (char *)value.data);
+	
+	free(key.data);
+	free(value.data);
+	
+	dbclose((DB *)myDB);
+
 	return 0;
 }
