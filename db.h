@@ -8,9 +8,11 @@
 #include <errno.h>
 #include <unistd.h>
 
+
 #define MAX_SIZE_KEY 16
 #define MAX_SIZE_VALUE 112
 #define DB_HEADER_SIZE sizeof(size_t) * 4 
+#define BYTE_SIZE 8
 #define OFFSET_SIZE 4
 #define MIN(a,b) ((a)>(b)?(b):(a))
 

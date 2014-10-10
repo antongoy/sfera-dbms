@@ -13,6 +13,50 @@ int writeInFile (DB_IMPL *db, BTREE *node);
 void freeNode(DB_IMPL *db, BTREE *node);
 void print_node (BTREE *x);
 
+void setBitTrue(byte *b, int pos) {
+	byte mask = 1;
+	mask <<= pos - 1;
+	*b |= mask;
+}
+
+void setBitFalse(byte *b, int pos) {
+	byte mask = 1;
+	mask <<= pos - 1;
+	mask = ~mask;
+	*b &= mask;
+}
+
+int power(int a, int n) {
+	int i;
+	int product = 1;
+	if (n == 0) {
+		return 1;
+	}
+	
+	for(i = 0; i < n; i++) {
+		product *= a;
+	}
+	return product;
+}
+
+int findTrueBit(byte *b) {
+	byte mask;
+	byte addmask;
+	int i;
+	
+	for (i = 7; i >= 0; i--) {
+		mask = ~(*b);
+		addmask = power(2, i);
+		mask |= addmask;
+		mask &= *b;
+		if (mask == 0) {
+			break;
+		}
+		
+	}
+	
+	return i + 1;
+}
 
 BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 	size_t i;
@@ -60,22 +104,29 @@ BTREE* readFromFile(DB_IMPL *db, size_t offset) {
 
 }
 
+int roundTop(double f) {
+	int r = (int)f;
+	return r + 1;
+}
+
 int writeInFile (DB_IMPL *db, BTREE *node) {
-	size_t i;
+	size_t i, j;
 
 	// If selfOffset = -1 then node hasn't written yet
 	if (node->selfOffset == -1) {
 
 		//Find free space in file - first bit that is set to zero
-		for (i = 0; db->mask[i] != 0 && i <  db->numOfBlocks; i++);
-
+		for (j = 0; (i = findTrueBit(&(db->mask[j]))) == 0 && j <  db->numOfBlocks; j++);
+		
 		//We can exceed size of mask. Then database is full
-		if (i == db->numOfBlocks) {
+		if (j == db->numOfBlocks) {
 			return -1;
 		}
+		
+		int numOfBytesForMask = db->numOfBlocks / BYTE_SIZE;
 
 		//Calculate new selfOffset
-		node->selfOffset = i * db->chunkSize + db->numOfBlocks + db->chunkSize;
+		node->selfOffset = (j * BYTE_SIZE + 8 - i) * db->chunkSize + roundTop(numOfBytesForMask / db->chunkSize) * db->chunkSize + db->chunkSize;
 
 		//Move to start of file and change curNumBlocks
 		if (lseek(db->fileDescriptor, 0, 0) == -1) {
@@ -89,21 +140,19 @@ int writeInFile (DB_IMPL *db, BTREE *node) {
 		}
 
 		//Move to bit which is responsible for new node
-		int offsetInMetadata = db->chunkSize + i;
+		int offsetInMetadata = db->chunkSize + j;
 		if (lseek(db->fileDescriptor, offsetInMetadata, 0) == -1) {
 			fprintf(stderr, "In function writeInFile: System call lseek() generated the error\n");
 			return -1;
 		}
-
-		//Set 1 in file and in 'db' structure
-		byte temp = 1;
-		byte *tempPtr = &temp;
-
-		if (write(db->fileDescriptor, tempPtr, sizeof(byte)) == -1) {
+		//printf("BEFORE: %uc",db->mask[j] )
+		setBitTrue(&(db->mask[j]), i);
+		
+		if (write(db->fileDescriptor, &(db->mask[j]), sizeof(byte)) == -1) {
 			fprintf(stderr, "In function writeInFile: System call write() generated the error\n");
 			return -1;
 		}
-		db->mask[i] = 1;
+		
 	}
 
 	//Auxiliary pointer 'ptr' for copying data in 'buf'
@@ -154,22 +203,49 @@ BTREE* allocateNode(size_t t, size_t leaf) {
 	size_t n = 2 * t;
 
 	BTREE * root = (BTREE *)malloc(sizeof(BTREE));
-
+	if (root == NULL) {
+		fprintf(stderr, "In allocateNode function: Memory allocation error (root).\n");
+		return NULL;
+	}
+	
 	root->n = 0;
 	root->selfOffset = -1;
 	root->leaf = leaf;
 
 	root->offsetsChildren = (size_t *)malloc(sizeof(size_t)*n);
+	if (root->offsetsChildren == NULL) {
+		fprintf(stderr, "In allocateNode function: Memory allocation error (root->offsetsChildren).\n");
+		return NULL;
+	}
+	
 	memset(root->offsetsChildren, 0, sizeof(size_t)*n);
 	root->keys = (DBT *)malloc(sizeof(DBT)*(n - 1));
+	if (root->keys == NULL) {
+		fprintf(stderr, "In allocateNode function: Memory allocation error (root->keys).\n");
+		return NULL;
+	}
+	
 	root->values = (DBT *)malloc(sizeof(DBT)*(n - 1));
-
+	if (root->values == NULL) {
+		fprintf(stderr, "In allocateNode function: Memory allocation error (root->values).\n");
+		return NULL;
+	}
+	
 	for (i = 0; i < n - 1; i++) {
 		root->values[i].size = 0;
 		root->keys[i].size = 0;
 		root->values[i].data = (byte *)malloc(sizeof(byte)*(MAX_SIZE_VALUE - sizeof(size_t)));
+		if (root->values[i].data == NULL) {
+			fprintf(stderr, "In allocateNode function: Memory allocation error (root->values[%lu].data).\n", i);
+			return NULL;
+		}
+		
 		memset(root->values[i].data, 0, sizeof(byte)*(MAX_SIZE_VALUE - sizeof(size_t)));
 		root->keys[i].data = (byte *)malloc(sizeof(byte)*(MAX_SIZE_KEY - sizeof(size_t)));
+		if (root->keys[i].data == NULL) {
+			fprintf(stderr, "In allocateNode function: Memory allocation error (root->keys[%lu].data).\n", i);
+			return NULL;
+		}
 		memset(root->keys[i].data, 0, sizeof(byte)*(MAX_SIZE_KEY - sizeof(size_t)));
 	}
 	return root;
@@ -203,8 +279,10 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 	newDB->numOfBlocks = m * conf->chunk_size;
 
 	//Allocate memory for bit mask - it shows free spaces in file
-	newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks);
-	memset(newDB->mask, 0, newDB->numOfBlocks);
+	newDB->mask = (byte *)malloc(newDB->numOfBlocks / 8);
+	memset(newDB->mask, 0, newDB->numOfBlocks / 8);
+	//newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks);
+	//memset(newDB->mask, 0, newDB->numOfBlocks);
 	
 	//Memory for auxiliary buffer. It is needed for writing in file
 	newDB->buf = (byte *)malloc(sizeof(byte) * newDB->chunkSize);
@@ -238,6 +316,11 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 
 	//Allocate memory for root node
 	newDB->root = allocateNode(newDB->t, 1);
+	if (newDB->root == NULL) {
+		fprintf(stderr, "In dbcreate function: Don't create new node\n");
+		return NULL;
+	}
+	
 
 	// -1 is mean that this node hasn't written in file yet
 	newDB->root->selfOffset = -1;
@@ -246,7 +329,8 @@ struct DB* dbcreate(const char *file, const struct DBC *conf) {
 	newDB->curNumOfBlocks++;
 
 	//No comments
-	if(writeInFile(newDB, newDB->root) == -1) {
+	if(writeInFile(newDB, newDB->root) < 0) {
+		fprintf(stderr, "In dbcreate function: Error in the writeInFile()\n");
 		return NULL;
 	}
 
@@ -307,13 +391,14 @@ DB* dbopen (const char *file) {
 		return NULL;
 	}
 	
-	newDB->mask = (byte *)malloc(sizeof(byte)*newDB->numOfBlocks); 
-	memset(newDB->buf, 0, newDB->chunkSize);   
+	newDB->mask = (byte *)malloc(newDB->numOfBlocks / BYTE_SIZE);
+
 	if (newDB->mask == NULL) {
 		fprintf(stderr, "In dbopen function: : Memory wasn't allocated for newDB->mask\n");
 		return NULL;
 	}
-	int m = newDB->numOfBlocks / newDB->chunkSize;
+	
+	memset(newDB->mask, 0, newDB->numOfBlocks / BYTE_SIZE); 
 	
 	//Read bit mask from file
 	byte * p = newDB->mask;
@@ -322,19 +407,19 @@ DB* dbopen (const char *file) {
 		fprintf(stderr, "In dbopen function: system call lseek() throws the error\n");
 		return NULL;
 	}
-
-	for(i = 1; i <= m; i++) {
-		if (read(newDB->fileDescriptor, p, newDB->chunkSize) == -1) {
-			fprintf(stderr, "In dbopen function: imposible read from database\n");
-			return NULL;
-		}
-		p += newDB->chunkSize;
+	
+	long m = roundTop((newDB->numOfBlocks / BYTE_SIZE)/newDB->chunkSize);
+	long l = (newDB->numOfBlocks / BYTE_SIZE) - (m - 1) * newDB->chunkSize;
+	
+	if (read(newDB->fileDescriptor, p, newDB->chunkSize*(m - 1) + l) == -1) {
+		fprintf(stderr, "In dbopen function: imposible read from database \n");
+		return NULL;
 	}
 
-	newDB->root = readFromFile(newDB, newDB->chunkSize + newDB->numOfBlocks);
+	newDB->root = readFromFile(newDB, m*newDB->chunkSize + newDB->chunkSize);
 
 	if (newDB->root == NULL) {
-		fprintf(stderr, "In dbopen function: imposible read	 the node from file\n");
+		fprintf(stderr, "In dbopen function: imposible read the node from file\n");
 		return NULL;
 	}
 	free(metaData);
@@ -352,8 +437,8 @@ void print_statistics(DB_IMPL *db) {
 	printf("--- Database size: %lu\n", db->dbSize);
 	printf("--- Degree of tree: %lu\n", db->t);
 	printf("--- Bitmask (first 10 elements): ");
-	for(i = 0; i < 20; i++) {
-		printf("%d", db->mask[i]);
+	for(i = 0; i < 10; i++) {
+		printf("%hhu ", db->mask[i]);
 	}
 	printf("\n");
 	printf("--- Offset of root node in file: %lu\n", db->root->selfOffset);
@@ -409,7 +494,11 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 	long j;
 	//Create new node
 	BTREE *z = allocateNode(db->t, 1);
-
+	if (z == NULL) {
+		fprintf(stderr, "In splitChild function: Don't create new node\n");
+		return NULL;
+	}
+	
 	//Copy simple information to new node 'z'
 	z->leaf = y->leaf;
 	z->n = db->t - 1;
@@ -438,7 +527,11 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 
 	//Write
 	db->curNumOfBlocks++;
-	writeInFile(db, z);
+	if (writeInFile(db, z) < 0) {
+		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		return NULL;
+	}
+	
 	x->offsetsChildren[i+1] = z->selfOffset;
 	
 	//Make place for new key and value ++++++
@@ -452,10 +545,16 @@ BTREE* splitChild(DB_IMPL *db, BTREE *x,  BTREE *y, size_t i) {
 	dbtcpy(&x->values[i], &y->values[db->t-1]);
 
 	x->n++;
-
-	writeInFile(db, y);
-	writeInFile(db, x);
-
+	if (writeInFile(db, y) < 0) {
+		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		return NULL;
+	}
+	
+	if (writeInFile(db, x) < 0) {
+		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		return NULL;
+	}
+	
 	return z;
 }
 
@@ -564,6 +663,7 @@ int insertNode(DB_IMPL *db, DBT *key, DBT *value) {
 
 int searchInTreeInside(DB_IMPL *db, BTREE *x, DBT *key, DBT *value) {
 	long i = 0;
+	//print_node(x);
 	while (i <= x->n-1 && memcmpwrapp2(key, &x->keys[i]) > 0) {
 		i++;
 	}
@@ -651,13 +751,13 @@ int mainForDbopen(void) {
 	}
 	
 	DBT key, value;
-	size_t k = 276355;
+	size_t k = 83205;
 	
 	key.data = (size_t *)malloc(sizeof(size_t));
 	key.size = sizeof(size_t);
 	
-	value.data = (byte *)malloc(10);
-	
+	value.data = (byte *)malloc(MAX_SIZE_VALUE - sizeof(size_t));
+	memset(value.data, 0 , MAX_SIZE_VALUE - sizeof(size_t));
 	memcpy(key.data, &k, sizeof(size_t)); 
 	
 	int g = searchInTree(db, &key, &value);
@@ -684,7 +784,10 @@ int main (int argc, char **argv) {
 		mainForDbopen();
 		return 0;
 	} 
-	
+	byte *t = (byte *)malloc(sizeof(byte));
+	memset(t, 255, sizeof(byte));
+	int  pos = findTrueBit(t);
+	printf("POSITION: %d\n", pos);
 	printf("\n--------------------------------------------------\n");
 	printf("--------------- NEW RUN OF PROGRAM ---------------\n");
 	printf("--------------------------------------------------\n");
@@ -711,8 +814,8 @@ int main (int argc, char **argv) {
 	value.data = (byte *)malloc(32);
 	value.size = 32;
 	
-	for(i = 0; i < 30; i++) {
-		r = rand() % 1000000; 
+	for(i = 0; i < 10000; i++) {
+		r = rand() % 100000000; 
 		if (i == 12) {
 			y = r;
 		}
