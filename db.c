@@ -37,6 +37,22 @@ int db_put(struct DB *db, void *key, size_t key_len,
 	return db->put(db, &keyt, &valt);
 }
 
+size_t binarySearch(const struct DBT *keys, size_t left_b,  size_t right_b, const DBT key) {
+	while (1) {
+		size_t mid = (left_b + right_b) / 2;
+		if (memcmpwrapp(&key, &keys[mid]) < 0) {
+			right_b = mid - 1;
+		} else if (memcmpwrapp(&key, &keys[mid]) {
+			left_b = mid + 1;
+		} else {
+			return mid;
+		}
+		if (left_b > right_b) {
+			return -1;
+		}
+	}
+}
+
 
 
 void setBitTrue(byte *b, int pos) {
@@ -640,22 +656,33 @@ int memcmpwrapp2 (const struct DBT *value1, const struct DBT *value2) {
 
 void insertNonfullNode(struct DB_IMPL *db, struct BTREE *x, struct DBT *key, const struct DBT *value) {
 	long i = x->n;
-
+	
 	if (x->leaf) {
 		if (x->n == 0) {
 			dbtcpy(&(x->keys[0]), key);
 			dbtcpy(&(x->values[0]), value);
 		} else {
-			while (memcmpwrapp(key, &(x->keys[i-1])) < 0) {
-				dbtcpy(&(x->keys[i]), &(x->keys[i-1]));
-				dbtcpy(&(x->values[i]), &(x->values[i-1]));
-				i--;
-				if (!i) {
+			size_t j;
+			for (j = 0; memcmpwrapp(key, &(x->keys[j])) > 0; j++) {
+				if (j == x->n) {
 					break;
 				}
+				
 			}
-			dbtcpy(&(x->keys[i]), key);
-			dbtcpy(&(x->values[i]), value);
+			if (j != x->n)
+				if (memcmpwrapp(key, &(x->keys[j])) == 0) {
+					dbtcpy(&(x->values[j]), value);
+					writeInFile(db, x);
+					return;
+				} 
+			
+			for (i = x->n; i > j; i--) {
+				dbtcpy(&(x->keys[i]), &(x->keys[i-1]));
+				dbtcpy(&(x->values[i]), &(x->values[i-1]));
+			}
+			
+			dbtcpy(&(x->keys[j]), key);
+			dbtcpy(&(x->values[j]), value);
 		}
 		
 		x->n++;
@@ -766,7 +793,7 @@ int searchInTreeInside(struct DB_IMPL *db, struct BTREE *x, struct DBT *key, str
 		
 	}
 	if (i != x->n) {
-		if (i>=0 && i <= x->n-1 && memcmpwrapp(key, &x->keys[i]) == 0) {
+		if (memcmpwrapp(key, &x->keys[i]) == 0) {
 			dbtcpy(value, &(x->values[i]));
 			if (x != db->root) {
 				freeNode(db,x);
