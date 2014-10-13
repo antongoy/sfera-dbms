@@ -7,10 +7,11 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h>
 
 
-#define MAX_SIZE_KEY 16
-#define MAX_SIZE_VALUE 112
+#define MAX_SIZE_KEY 32
+#define MAX_SIZE_VALUE 32
 #define DB_HEADER_SIZE sizeof(size_t) * 4 
 #define BYTE_SIZE 8
 #define OFFSET_SIZE 4
@@ -26,19 +27,19 @@ struct DBT {
 
 struct DB {
 	/* Public API */
-	int (*close)(const struct DB *db);
-	int (*del)(const struct DB *db, const struct DBT *key);
-	int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);
-	int (*put)(const struct DB *db,  struct DBT *key, const struct DBT *data);
-	int (*sync)(const struct DB *db);
+	int (*close)(struct DB *db);
+	int (*del)(struct DB *db, const struct DBT *key);
+	int (*get)(struct DB *db, struct DBT *key, struct DBT  *data);
+	int (*put)(struct DB *db,  struct DBT *key, const struct DBT *data);
+	int (*sync)(struct DB *db);
 }; /* Need for supporting multiple backends (HASH/BTREE) */
 
 struct DB_IMPL {
-	int (*close)(const struct DB *db);
-	int (*del)(const struct DB *db, const struct DBT *key);
-	int (*get)(const struct DB *db, struct DBT *key, struct DBT  *data);
-	int (*put)(const struct DB *db,  struct DBT *key, const struct DBT *data);
-	int (*sync)(const struct DB *db);
+	int (*close)(struct DB *db);
+	int (*del)(struct DB *db, const struct DBT *key);
+	int (*get)(struct DB *db, struct DBT *key, struct DBT *data);
+	int (*put)(struct DB *db,  struct DBT *key, const struct DBT *data);
+	int (*sync)(struct DB *db);
 
 	size_t fileDescriptor; /* File descriptor which is associated with database */
 	struct BTREE *root; /* Root of btree */
@@ -70,14 +71,23 @@ struct DBC {
 		size_t chunk_size;
 		/* Maximum memory size */
 		/* 16MB by default */
-		size_t mem_size;
+		//size_t mem_size;
 };
 
-struct BTREE_POS {
-	struct BTREE *node;
-	size_t pos;
-};
-
-struct DB *dbcreate(const char *file, const struct DBC *conf);
+struct DB *dbcreate(const char *file, const struct DBC conf);
 struct DB *dbopen(const char *file);
 
+struct BTREE* readFromFile(struct DB_IMPL *db, size_t offset);
+struct BTREE* allocateNode(size_t t, size_t leaf);
+int writeInFile (struct DB_IMPL *db, struct BTREE *node);
+void freeNode(struct DB_IMPL *db, struct BTREE *node);
+void print_node (struct BTREE *x);
+int insertNode(struct DB *db, struct DBT *key, const struct DBT *value);
+int searchInTree(struct DB *db, struct DBT *key, struct DBT *value);
+int dbclose (struct DB *dbForClosing);
+int deleteKey(struct DB *aux_db, const struct DBT *key);
+
+int db_close(struct DB *db);
+int db_del(struct DB *db, void *key, size_t key_len);
+int db_get(struct DB *db, void *key, size_t key_len, void **val, size_t *val_len);
+int db_put(struct DB *db, void *key, size_t key_len, void *val, size_t val_len);
