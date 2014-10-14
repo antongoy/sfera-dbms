@@ -10,8 +10,8 @@
 #include <time.h>
 
 
-#define MAX_SIZE_KEY 32
-#define MAX_SIZE_VALUE 32
+#define MAX_SIZE_KEY 64
+#define MAX_SIZE_VALUE 128
 #define DB_HEADER_SIZE sizeof(size_t) * 4 
 #define BYTE_SIZE 8
 #define OFFSET_SIZE 4
@@ -86,6 +86,7 @@ int insertNode(struct DB *db, struct DBT *key, const struct DBT *value);
 int searchInTree(struct DB *db, struct DBT *key, struct DBT *value);
 int dbclose (struct DB *dbForClosing);
 int deleteKey(struct DB *aux_db, const struct DBT *key);
+int memcmpwrapp (const struct DBT *value1, const struct DBT *value2);
 
 int db_close(struct DB *db);
 int db_del(struct DB *db, void *key, size_t key_len);

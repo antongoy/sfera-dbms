@@ -37,12 +37,12 @@ int db_put(struct DB *db, void *key, size_t key_len,
 	return db->put(db, &keyt, &valt);
 }
 
-size_t binarySearch(const struct DBT *keys, size_t left_b,  size_t right_b, const DBT key) {
+/*size_t binarySearch(const struct DBT *keys, size_t left_b,  size_t right_b, const DBT key) {
 	while (1) {
 		size_t mid = (left_b + right_b) / 2;
 		if (memcmpwrapp(&key, &keys[mid]) < 0) {
 			right_b = mid - 1;
-		} else if (memcmpwrapp(&key, &keys[mid]) {
+		} else if (memcmpwrapp(&key, &keys[mid]) > 0) {
 			left_b = mid + 1;
 		} else {
 			return mid;
@@ -51,7 +51,7 @@ size_t binarySearch(const struct DBT *keys, size_t left_b,  size_t right_b, cons
 			return -1;
 		}
 	}
-}
+}*/
 
 
 
@@ -151,7 +151,7 @@ int myround(double f) {
 	return r + 1;
 }
 
-void removeFromFile(struct DB_IMPL *db, struct BTREE *x) {
+int removeFromFile(struct DB_IMPL *db, struct BTREE *x) {
 	int numOfBytesForMask = db->numOfBlocks / BYTE_SIZE;
 	int m = myround(numOfBytesForMask / db->chunkSize);
 	int pos_in_mask = (x->selfOffset - (m*db->chunkSize + db->chunkSize)) / db->chunkSize;
@@ -161,6 +161,26 @@ void removeFromFile(struct DB_IMPL *db, struct BTREE *x) {
 	pos_in_byte %= BYTE_SIZE;
 	pos_in_byte = BYTE_SIZE - pos_in_byte;
 	setBitFalse(&db->mask[num_of_byte], pos_in_byte);
+	if (lseek(db->fileDescriptor, 0, 0) < 0) {
+		perror("lseek");
+		return -1;
+	}
+	db->curNumOfBlocks--;
+	if (write(db->fileDescriptor, &db->curNumOfBlocks, sizeof(size_t)) != sizeof(size_t)) {
+		perror("write");
+		return -1;
+	}
+	
+	if (lseek(db->fileDescriptor, db->chunkSize + num_of_byte, 0) < 0) {
+		perror("lseek");
+		return -1;
+	}
+	if (write(db->fileDescriptor, &db->mask[num_of_byte], sizeof(byte)) != sizeof(byte)) {
+		perror("write");
+		return -1;
+	}
+	
+	return 0;
 }
 
 int writeInFile (struct DB_IMPL *db, struct BTREE *node) {
@@ -536,7 +556,7 @@ void print_node (struct BTREE *x) {
 		 j = 0;
 		}
 		*((char *)x->keys[i].data + x->keys[i].size) = '\0';
-		printf("%2d->%s  ", i, (char *)x->keys[i].data);
+		printf("%2d->(%lu, %lu)  ", i, *((size_t *)x->keys[i].data), x->keys[i].size);
 	}
 	
 	j=0;
@@ -870,13 +890,22 @@ void freeDBT (struct DBT *ptr) {
 void merge_nodes(struct DB_IMPL *db, struct BTREE *y, const struct DBT *key, 
 		const struct DBT *value, struct BTREE *z) {
 	size_t j;
+
+	dbtcpy(&y->keys[db->t-1], key);
+	dbtcpy(&y->values[db->t-1], value);
 	
-	dbtcpy(&y->keys[db->t], key);
-	dbtcpy(&y->values[db->t], value);
-	for(j = 1; j < db->t; j++) {
-		dbtcpy(&y->keys[j+db->t], &z->keys[j]);
-		dbtcpy(&y->values[j+db->t], &z->values[j]);
+	for(j = 1; j <= db->t - 1; j++) {
+		dbtcpy(&y->keys[j+db->t-1], &z->keys[j-1]);
+		dbtcpy(&y->values[j+db->t-1], &z->values[j-1]);
 	}
+	
+	if (!y->leaf) {
+		for (j = 1; j <= db->t ; j++) {
+			y->offsetsChildren[db->t + j] = z->offsetsChildren[j-1];
+		}
+	}
+	
+	y->n = 2*db->t - 1;
 }
 
 int posInNode(struct BTREE *x, const struct DBT *key) {
@@ -935,13 +964,13 @@ void keysSwapDirect(struct BTREE *cur_child, int cur_pos, struct BTREE *parent, 
 void keysSwapUndirect(struct BTREE *prev_child, int prev_pos,  struct BTREE *parent, struct BTREE *cur_child) {
 	size_t i;
 	
-	for (i = cur_child->n; i > 0; i++) {
+	for (i = cur_child->n; i > 0; i--) {
 		dbtcpy(&cur_child->keys[i], &cur_child->keys[i-1]);
 		dbtcpy(&cur_child->values[i], &cur_child->values[i-1]);
 	}
 	
 	if (!cur_child->leaf) {
-		for (i = cur_child->n + 1; i > 0; i++) {
+		for (i = cur_child->n + 1; i > 0; i--) {
 			cur_child->offsetsChildren[i] = cur_child->offsetsChildren[i-1];
 		}
 	}
@@ -951,8 +980,8 @@ void keysSwapUndirect(struct BTREE *prev_child, int prev_pos,  struct BTREE *par
 	
 	cur_child->n++;
 	
-	dbtcpy(&parent->keys[prev_pos], &prev_child->keys[0]);
-	dbtcpy(&parent->values[prev_pos], &prev_child->values[0]);
+	dbtcpy(&parent->keys[prev_pos], &prev_child->keys[prev_child->n - 1]);
+	dbtcpy(&parent->values[prev_pos], &prev_child->values[prev_child->n - 1]);
 	
 	if (!cur_child->leaf) {
 		cur_child->offsetsChildren[0] = prev_child->offsetsChildren[prev_child->n];
@@ -964,7 +993,6 @@ void keysSwapUndirect(struct BTREE *prev_child, int prev_pos,  struct BTREE *par
 
 int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key) {
 	size_t i,j;
-	printf("HEY\n");
 	i = posInNode(x, key);
 	
 	if (i != 0 && i != x->n) {
@@ -1036,19 +1064,22 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 				
 				x->n--;
 				
+				writeInFile(db, x);
+				
 				deleteKeyInside(db, y, key);
 				
-				if (x == db->root && x->n == 0) {
+				/*if (x == db->root && x->n == 0) {
 					removeFromFile(db, y);
 					removeFromFile(db, db->root);
-					y->selfOffset = db->root->selfOffset;
+					y->selfOffset = -1;
 					freeNode(db, db->root);
 					db->root = y;
+					db->curNumOfBlocks++;
 					writeInFile(db, y);
-				} else {
-					writeInFile(db, x);
-					freeNode(db, y);
-				}
+				} else {*/
+					
+				freeNode(db, y);
+				//}
 				
 				return 0;
 			}
@@ -1085,30 +1116,33 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 					freeNode(db, z);
 					
 					size_t j;
-					for(j = i-1; j < x->n - 1; j++) {
+					for(j = i; j < x->n - 1; j++) {
 						dbtcpy(&x->keys[j], &x->keys[j+1]);
 						dbtcpy(&x->values[j], &x->values[j+1]);
 					}
 					
-					for(j = i; j < x->n; j++) {
+					for(j = i+1; j < x->n; j++) {
 						x->offsetsChildren[j] = x->offsetsChildren[j+1];
 					}
 					
 					x->n--;
 					
+					writeInFile(db, x);
+					
 					int ret = deleteKeyInside(db, y, key);
 					
-					if (x == db->root && x->n == 0) {
+					/*if (x == db->root && x->n == 0) {
 						removeFromFile(db, y);
-						y->selfOffset = db->root->selfOffset;
+						y->selfOffset = -1;
 						removeFromFile(db, db->root);
 						freeNode(db, db->root);
 						db->root = y;
+						db->curNumOfBlocks++;
 						writeInFile(db, y);
-					} else {
-						writeInFile(db, x);
-						freeNode(db, y);
-					}
+					} else {*/
+						
+					freeNode(db, y);
+					//}
 					return ret;
 				}
 			} else {
@@ -1191,9 +1225,10 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 					if (x == db->root && x->n == 0) {
 						removeFromFile(db, y);
 						removeFromFile(db, db->root);
-						y->selfOffset = db->root->selfOffset;
+						y->selfOffset = -1;
 						freeNode(db, db->root);
 						db->root = y;
+						db->curNumOfBlocks++;
 						writeInFile(db, y);
 					} else {
 						writeInFile(db, x);
@@ -1204,8 +1239,8 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 				}
 			} else {
 				if (x->leaf) {
-				return -1;
-			}
+					return -1;
+				}
 				struct BTREE *y = readFromFile(db, x->offsetsChildren[i]);
 				if (y->n == db->t - 1) {
 					struct BTREE *z = readFromFile(db, x->offsetsChildren[i+1]);
@@ -1223,12 +1258,12 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 					freeNode(db, z);
 					
 					size_t j;
-					for(j = i-1; j < x->n - 1; j++) {
+					for(j = i; j < x->n - 1; j++) {
 						dbtcpy(&x->keys[j], &x->keys[j+1]);
 						dbtcpy(&x->values[j], &x->values[j+1]);
 					}
 					
-					for(j = i; j < x->n; j++) {
+					for(j = i+1; j < x->n; j++) {
 						x->offsetsChildren[j] = x->offsetsChildren[j+1];
 					}
 					
@@ -1238,10 +1273,11 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 					
 					if (x == db->root && x->n == 0) {
 						removeFromFile(db, y);
-						y->selfOffset = db->root->selfOffset;
+						y->selfOffset = -1;
 						removeFromFile(db, db->root);
 						freeNode(db, db->root);
 						db->root = y;
+						db->curNumOfBlocks++;
 						writeInFile(db, y);
 					} else {
 						writeInFile(db, x);
@@ -1272,19 +1308,9 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 					freeNode(db, y);
 					return ret;
 				} 
-				merge_nodes(db, z, &x->keys[i], &x->values[i], y);
+				merge_nodes(db, z, &x->keys[i-1], &x->values[i-1], y);
 				removeFromFile(db, y);
 				freeNode(db, y);
-				
-				size_t j;
-				for(j = i-1; j < x->n - 1; j++) {
-					dbtcpy(&x->keys[j], &x->keys[j+1]);
-					dbtcpy(&x->values[j], &x->values[j+1]);
-				}
-				
-				for(j = i; j < x->n; j++) {
-					x->offsetsChildren[j] = x->offsetsChildren[j+1];
-				}
 				
 				x->n--;
 				
@@ -1292,10 +1318,11 @@ int deleteKeyInside (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 				
 				if (x == db->root && x->n == 0) {
 					removeFromFile(db, z);
-					z->selfOffset = db->root->selfOffset;
+					z->selfOffset = -1;
 					removeFromFile(db, db->root);
 					freeNode(db, db->root);
 					db->root = z;
+					db->curNumOfBlocks++;
 					writeInFile(db, z);
 				} else {
 					writeInFile(db, x);
@@ -1361,7 +1388,7 @@ int mainForDbopen(void) {
 	dbclose((struct DB *)db);
 	return 0;
 }
-/*
+
 int main (int argc, char **argv) {
 	if (argc == 2 && strcmp(argv[1], "open") == 0) {
 		mainForDbopen();
@@ -1392,55 +1419,30 @@ int main (int argc, char **argv) {
 	key.data = (size_t *)malloc(sizeof(size_t));
 	key.size = sizeof(size_t);
 	value.data = (byte *)malloc(32);
-	value.size = 19;
-	
-	for(i = 0; i < 1000; i++) {
+	value.size = 32;
+	size_t del_k[1000];
+	FILE *fp = fopen("data.txt", "w");
+	for(i = 0; i < 100; i++) {
 		r = rand() % 100000000; 
-		if (i == 12) {
-			y = r;
-		}
-		if (i == 56) {
-			x = r;
-		}
+		del_k[i] = r;
+		fprintf(fp, "%lu ", del_k[i]);
 		valueGen(str, 32);
 		memcpy(value.data, str, value.size);
-		memcpy(key.data, &r, key.size);
+		memcpy(key.data, &del_k[i], key.size);
 		insertNode((struct DB *)myDB, &key, &value);
 	}
-	
-	//print_statistics(myDB);
-	
+	fclose(fp);
 	printBTREE(myDB, myDB->root, 0, 0);
 	
-	printf("\n--- KEY FOR DELETING: %lu ---\n", y);
-	
-	memcpy(key.data, &y, key.size);
-	int h = myDB->del((struct DB *)myDB, &key);
-	
-	printBTREE(myDB, myDB->root, 0, 0);
-	
-	memcpy(key.data, &x, key.size);
-	h = myDB->del((struct DB *)myDB, &key);
-	
-	printBTREE(myDB, myDB->root, 0, 0);
-	
-	if (h == -1) {
-		printf("There isn't key in this database\n");
-		dbclose((struct DB *)myDB);
-		return 0;
+	for (i = 0; i < 100; i++) {
+		memcpy(key.data, &del_k[i], key.size);
+		if (deleteKey((struct DB *)myDB, &key) < 0) {
+			fprintf(stderr, "Problem in deleteKey: key[%lu]--> %lu\n",i, del_k[i]);
+		}
 	}
 	
-	int u = myDB->get((struct DB *)myDB, &key, &value);
-	
-	//printBTREE(myDB, myDB->root, 0, 0);
-	
-	if (u == -1) {
-		printf("There isn't key in this database\n");
-		dbclose((struct DB *)myDB);
-		return 0;
-	}
-	
-	printf("---- VALUE OF KEY %lu IS %s -----\n", y, (char *)value.data);
+	printBTREE(myDB, myDB->root, 0, 0);
+	print_statistics(myDB);
 
 	free(key.data);
 	free(value.data);
@@ -1448,5 +1450,5 @@ int main (int argc, char **argv) {
 	dbclose((struct DB *)myDB);
 
 	return 0;
-}*/
+}
 
