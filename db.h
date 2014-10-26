@@ -77,16 +77,16 @@ struct DBC {
 struct DB *dbcreate(const char *file, const struct DBC conf);
 struct DB *dbopen(const char *file);
 
-struct BTREE* readFromFile(struct DB_IMPL *db, size_t offset);
-struct BTREE* allocateNode(size_t t, size_t leaf);
-int writeInFile (struct DB_IMPL *db, struct BTREE *node);
+struct BTREE* read_from_file(struct DB_IMPL *db, size_t offset);
+struct BTREE* allocate_node(size_t t, size_t leaf);
+int write_in_file (struct DB_IMPL *db, struct BTREE *node);
 void freeNode(struct DB_IMPL *db, struct BTREE *node);
-void print_node (FILE *f, struct BTREE *x);
+void print_node (struct BTREE *x);
 int insert_key (struct DB *db, struct DBT *key, const struct DBT *value);
 int search_key(struct DB *db, struct DBT *key, struct DBT *value);
 int dbclose (struct DB *dbForClosing);
 int delete_key(struct DB *aux_db, const struct DBT *key);
-int memcmpwrapp (const struct DBT *value1, const struct DBT *value2);
+int memcmp_wrapper (const struct DBT *value1, const struct DBT *value2);
 int is_in_node (struct BTREE *x, const struct DBT *key, size_t *pos);
 
 int db_close(struct DB *db);
