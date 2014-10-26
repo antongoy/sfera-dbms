@@ -37,24 +37,6 @@ int db_put(struct DB *db, void *key, size_t key_len,
 	return db->put(db, &keyt, &valt);
 }
 
-/*size_t binarySearch(const struct DBT *keys, size_t left_b,  size_t right_b, const DBT key) {
-	while (1) {
-		size_t mid = (left_b + right_b) / 2;
-		if (memcmpwrapp2(&key, &keys[mid]) < 0) {
-			right_b = mid - 1;
-		} else if (memcmpwrapp2(&key, &keys[mid]) > 0) {
-			left_b = mid + 1;
-		} else {
-			return mid;
-		}
-		if (left_b > right_b) {
-			return -1;
-		}
-	}
-}*/
-
-
-
 void setBitTrue(byte *b, int pos) {
 	byte mask = 1;
 	mask <<= pos - 1;
@@ -330,8 +312,8 @@ struct DB* dbcreate(const char *file, const struct DBC conf) {
 	size_t i;
 
 	if ((fd = open(file, O_CREAT|O_RDWR|O_TRUNC,  S_IRWXU)) < 0) {
-		fprintf(stderr, "In dbcreate function: Impossible creating new file\n");
-		return NULL;
+        perror("In dbcreate function (open)");
+        exit(1);
 	}
 
 	//Allocate memory for new Database
@@ -341,10 +323,10 @@ struct DB* dbcreate(const char *file, const struct DBC conf) {
 		return NULL;
 	}
 	
-	newDB->put = &insertNode;
-	newDB->get = &searchInTree;
+	newDB->put = &insert_key;
+	newDB->get = &search_key;
 	newDB->close = &dbclose;
-	newDB->del = &deleteKey;
+	newDB->del = &delete_key;
 	
 	//Fill simple fields in newDB structure
 	newDB->fileDescriptor = fd;
@@ -435,8 +417,8 @@ struct DB* dbopen (const char *file) {
 		return NULL;
 	}
 	
-	newDB->put = &insertNode;
-	newDB->get = &searchInTree;
+	newDB->put = &insert_key;
+	newDB->get = &search_key;
 	newDB->close = &dbclose;
 	
 
@@ -541,47 +523,46 @@ void print_statistics(struct DB_IMPL *db) {
 	printf("\n");
 }
 
-void print_node (struct BTREE *x) {
+void print_node (FILE *f, struct BTREE *x) {
 	int i, numColKeys = 4, numColValue = 2, numColChildren = 3;
-	//printf("\n\t====================  NODE INFORMATION ==================== \n\n");
-	printf("\n\t\t Offset of node in file: %lu\n", x->selfOffset);
-	printf("\t\t Number of keys in  node: %lu\n", x->n);
-	printf("\t\t Leaf flag: %lu\n", x->leaf);
-	printf("\t\t Keys in node: \n\t\t");
+	fprintf(f, "\n\t\t Offset of node in file: %lu\n", x->selfOffset);
+	fprintf(f, "\t\t Number of keys in  node: %lu\n", x->n);
+    fprintf(f, "\t\t Leaf flag: %lu\n", x->leaf);
+    fprintf(f, "\t\t Keys in node: \n\t\t");
 	
 	int j = 0;
 	for(i = 0; i < x->n; i++, j++) {
 		if (j == numColKeys) {
-		 printf("\n\t\t");
+            fprintf(f, "\n\t\t");
 		 j = 0;
 		}
 		*((char *)x->keys[i].data + x->keys[i].size) = '\0';
-		printf("%2d->(%lu, %lu)  ", i, *((size_t *)x->keys[i].data), x->keys[i].size);
+        fprintf(f, "%2d->(%s, %lu)  ", i, (char *)x->keys[i].data, x->keys[i].size);
 	}
 	
 	j=0;
-	printf("\n\t\t Values: \n\t\t");
+    fprintf(f, "\n\t\t Values: \n\t\t");
 	
 	for(i = 0; i < x->n; i++, j++) {
 		if (j == numColValue) {
-			printf("\n\t\t");
+            fprintf(f, "\n\t\t");
 			j = 0;
 		}
-		printf("%2d--->%s  ", i, (char *)(x->values[i].data));
+		fprintf(f, "%2d--->%s  ", i, (char *)(x->values[i].data));
 	}
-	printf("\n");
+	fprintf(f, "\n");
 	
 	j=0;
-	printf("\n\t\t Children: \n\t\t");
+	fprintf(f, "\n\t\t Children: \n\t\t");
 	
 	for(i = 0; i <= x->n; i++, j++) {
 		if (j == numColChildren) {
-			printf("\n\t\t");
+			fprintf(f, "\n\t\t");
 			j = 0;
 		}
-		printf("%2d--->%lu  ", i, x->offsetsChildren[i]);
+		fprintf(f, "%2d--->%lu  ", i, x->offsetsChildren[i]);
 	}
-	printf("\n");
+    fprintf(f, "\n");
 }
 
 void dbtcpy(struct DBT *data1, const struct DBT *data2) {
@@ -589,12 +570,12 @@ void dbtcpy(struct DBT *data1, const struct DBT *data2) {
 	memcpy(data1->data, data2->data, data1->size);
 }
 
-struct BTREE* splitChild(struct DB_IMPL *db, struct BTREE *x,  struct BTREE *y, size_t i) {
+struct BTREE* split_child(struct DB_IMPL *db, struct BTREE *x,  struct BTREE *y, size_t i) {
 	long j;
 	//Create new node
 	struct BTREE *z = allocateNode(db->t, 1);
 	if (z == NULL) {
-		fprintf(stderr, "In splitChild function: Don't create new node\n");
+		fprintf(stderr, "In split_child function: Don't create new node\n");
 		return NULL;
 	}
 	
@@ -627,7 +608,7 @@ struct BTREE* splitChild(struct DB_IMPL *db, struct BTREE *x,  struct BTREE *y, 
 	//Write
 	db->curNumOfBlocks++;
 	if (writeInFile(db, z) < 0) {
-		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		fprintf(stderr, "In split_child function: error in the writeInFile()\n");
 		return NULL;
 	}
 	
@@ -645,12 +626,12 @@ struct BTREE* splitChild(struct DB_IMPL *db, struct BTREE *x,  struct BTREE *y, 
 
 	x->n++;
 	if (writeInFile(db, y) < 0) {
-		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		fprintf(stderr, "In split_child function: error in the writeInFile()\n");
 		return NULL;
 	}
 	
 	if (writeInFile(db, x) < 0) {
-		fprintf(stderr, "In splitChild function: error in the writeInFile()\n");
+		fprintf(stderr, "In split_child function: error in the writeInFile()\n");
 		return NULL;
 	}
 	
@@ -670,8 +651,12 @@ void freeNode (struct DB_IMPL *db, struct BTREE *node) {
 
 }
 
-int memcmpwrapp (const struct DBT *value1, const struct DBT *value2) {
-	return memcmp(value1->data, value2->data, MIN(value1->size, value2->size));
+int memcmp_wrapper (const struct DBT *value1, const struct DBT *value2) {
+    int memcmp_res = memcmp(value1->data, value2->data, MIN(value1->size, value2->size));
+    if (value1->size != value2->size && memcmp_res == 0) {
+        return value1->size > value2->size ? 1 : -1;
+    }
+	return memcmp_res;
 }
 
 int memcmpwrapp2 (const struct DBT *value1, const struct DBT *value2) {
@@ -686,78 +671,63 @@ int memcmpwrapp2 (const struct DBT *value1, const struct DBT *value2) {
 	}
 }
 
-void insertNonfullNode(struct DB_IMPL *db, struct BTREE *x, struct DBT *key, const struct DBT *value) {
+void insert_key_nonfull (struct DB_IMPL *db, struct BTREE *x, 
+                       struct DBT *key, const struct DBT *value){
 	long i = x->n;
+    size_t j;
+    int flag = is_in_node(x, key, &j);
 	
 	if (x->leaf) {
 		if (x->n == 0) {
 			dbtcpy(&(x->keys[0]), key);
 			dbtcpy(&(x->values[0]), value);
 		} else {
-			size_t j;
-			for (j = 0; memcmpwrapp2(key, &(x->keys[j])) > 0; j++) {
-				if (j == x->n) {
-					break;
-				}
-				
-			}
-			if (j != x->n)
-				if (memcmpwrapp2(key, &(x->keys[j])) == 0) {
-					dbtcpy(&(x->values[j]), value);
-					writeInFile(db, x);
-					return;
-				} 
-			
+
+            if (flag) {
+                dbtcpy(&(x->values[j]), value);
+                writeInFile(db, x);
+                return;
+            }
+
 			for (i = x->n; i > j; i--) {
 				dbtcpy(&(x->keys[i]), &(x->keys[i-1]));
 				dbtcpy(&(x->values[i]), &(x->values[i-1]));
 			}
-			
+
 			dbtcpy(&(x->keys[j]), key);
 			dbtcpy(&(x->values[j]), value);
 		}
-		
 		x->n++;
 		writeInFile(db, x);
-
 	} else {
-
-		do {
-			i--;
-			if (i == -1) {
-				break;
-			}
-		} while (i >= 0 && memcmpwrapp2(key, &x->keys[i]) < 0);
-
-		i++;
-		struct BTREE *child = readFromFile(db, x->offsetsChildren[i]);
+		struct BTREE *child = readFromFile(db, x->offsetsChildren[j]);
 		if (child->n == 2*db->t - 1) {
-			struct BTREE *newChild = splitChild(db, x, child, i);
-			if (memcmpwrapp2(key, &x->keys[i]) > 0) {
-				insertNonfullNode(db, newChild, key, value);
+			struct BTREE *newChild = split_child(db, x, child, j);
+			if (memcmp_wrapper(key, &x->keys[j]) > 0) {
+				insert_key_nonfull(db, newChild, key, value);
 			} else {
-				insertNonfullNode(db, child, key, value);
+				insert_key_nonfull(db, child, key, value);
 			}
 			freeNode(db, newChild);
 		} else {
-			insertNonfullNode(db, child, key, value);
+			insert_key_nonfull(db, child, key, value);
 		}
 		freeNode(db,child);
 	}
 }
 
 
-void printBTREE (struct DB_IMPL *db, struct BTREE *x, int depth, int n) {
+void printBTREE (FILE *f, struct DB_IMPL *db, struct BTREE *x, int depth, int n) {
 	struct BTREE *child;
 	size_t i;
-	
-	printf("\n=============================================================================================\n");
-	printf("================================= START ROOT OF SUBTREE ======================================\n");
-	printf("=================================== DEPTH: %d NUM: %d ==========================================\n", depth, n);
-	print_node(x);
-	printf("\n=============================================================================================\n");
-	printf("=================================== START ITS CHILDREN =======================================\n");
-	printf("=============================================================================================\n");
+
+    fprintf(f, "\n=============================================================================================\n");
+    fprintf(f, "================================= START ROOT OF SUBTREE ======================================\n");
+    fprintf(f, "=================================== DEPTH: %d NUM: %d ==========================================\n", depth, n);
+	print_node(f, x);
+    fprintf(f, "\n=============================================================================================\n");
+    fprintf(f, "=================================== START ITS CHILDREN =======================================\n");
+    fprintf(f, "=============================================================================================\n");
 	for(i = 0; i < x->n + 1; i++) {
 		if (x->n == 0) {
 			break;
@@ -765,9 +735,9 @@ void printBTREE (struct DB_IMPL *db, struct BTREE *x, int depth, int n) {
 		
 		child = readFromFile(db, x->offsetsChildren[i]);
 		if(x->leaf == 0) {
-			printf("\n========================================= IT'S %lu CHILD =======================================\n", i);
-			print_node(child);
-			freeNode(db, child);
+            fprintf(f, "\n========================================= IT'S %lu CHILD =======================================\n", i);
+			print_node(f, child);
+            freeNode(db, child);
 		}
 	}
 	
@@ -777,22 +747,20 @@ void printBTREE (struct DB_IMPL *db, struct BTREE *x, int depth, int n) {
 		}
 		child = readFromFile(db, x->offsetsChildren[i]);
 		if (child->leaf == 0) {
-			printBTREE(db, child, depth + 1, i);
+            printBTREE(f, db, child, depth + 1, i);
 			freeNode(db,child);
 		}
 	}
-	printf("\n=================================================================================================\n");
-	printf("============================================= END OF TREE =======================================\n");
-	printf("=================================================================================================\n\n");
+    fprintf(f, "\n=================================================================================================\n");
+    fprintf(f, "============================================= END OF TREE =======================================\n");
+    fprintf(f, "=================================================================================================\n\n");
 }
 
 
-int insertNode(struct DB *aux_db, struct DBT *key, const struct DBT *value) {
+int insert_key(struct DB *aux_db, struct DBT *key, const struct DBT *value) {
 	struct DB_IMPL *db = (struct DB_IMPL *)aux_db;
 	struct BTREE *temp = db->root;
 	
-	//printBTREE(db, db->root, 0 , 0);
-
 	if (temp->n == 2*db->t - 1) {
 		struct BTREE *s = allocateNode(db->t, 1);
 		db->root = s;
@@ -804,69 +772,44 @@ int insertNode(struct DB *aux_db, struct DBT *key, const struct DBT *value) {
 		db->root->offsetsChildren[0] = temp->selfOffset;
 		db->curNumOfBlocks++;
 		writeInFile(db, db->root);
-		struct BTREE *t = splitChild(db, db->root, temp, 0);
+		struct BTREE *t = split_child(db, db->root, temp, 0);
 		freeNode(db, temp);
-		insertNonfullNode(db, s, key, value);
+		insert_key_nonfull(db, s, key, value);
 		freeNode(db,t);
 		return 0;
 	} else {
-		insertNonfullNode(db, temp, key, value);
+		insert_key_nonfull(db, temp, key, value);
 		return 0;
 	}
 }
 
-int searchInTreeInside(struct DB_IMPL *db, struct BTREE *x, struct DBT *key, struct DBT *value) {
-	long i = 0;
-	//print_node(x);
-	while (memcmpwrapp2(key, &x->keys[i]) > 0) {
-		i++;
-		if (i == x->n) {
-			break;
-		}
-		
-	}
-	if (i != x->n) {
-		if (memcmpwrapp2(key, &x->keys[i]) == 0) {
-			dbtcpy(value, &(x->values[i]));
-			if (x != db->root) {
-				freeNode(db,x);
-			}
-			return 0;
-		} else {
-			if (x->leaf) {
-				if (x != db->root) {
-					freeNode(db,x);
-				}
-				return -1;
-			} else {
-				
-				struct BTREE *newNode = readFromFile(db, x->offsetsChildren[i]);
-				if (x != db->root) {
-					freeNode(db,x);
-				}
-				return searchInTreeInside(db, newNode, key, value);
-			}
-		}
-	} else {
-		if (x->leaf) {
-			if (x != db->root) {
-				freeNode(db,x);
-			}
-			return -1;
-		} else {
-			struct BTREE *newNode = readFromFile(db, x->offsetsChildren[i]);
-			if (x != db->root) {
-				freeNode(db,x);
-			}
-			return searchInTreeInside(db, newNode, key, value);
-		}
-	}
+int search_key_inside(struct DB_IMPL *db, struct BTREE *x, struct DBT *key, struct DBT *value) {
+    long i = 0;
+
+    int flag = is_in_node(x, key, &i);
+
+    if (flag == 1) {
+        dbtcpy(value, &(x->values[i]));
+        return 0;
+    } else {
+        if (x->leaf) {
+            return -1;
+        }
+        struct BTREE *new_node = readFromFile(db, x->offsetsChildren[i]);
+        if (new_node == NULL) {
+            perror("Error in search_key_inside function (read_from_file): ");
+            return -1;
+        }
+        int  res =  search_key_inside(db, new_node, key, value);
+        freeNode(db, new_node);
+        return res;
+    }
 }
 
-int searchInTree(struct DB *aux_db, struct DBT *key, struct DBT *value) {
+int search_key(struct DB *aux_db, struct DBT *key, struct DBT *value) {
 	struct DB_IMPL *db = (struct DB_IMPL *)aux_db;
-	value->data = (byte *)malloc(MAX_SIZE_VALUE);
-	return searchInTreeInside(db, db->root, key, value);
+    value->data = (byte *)malloc(MAX_SIZE_VALUE);
+	return search_key_inside(db, db->root, key, value);
 }
 
 int dbclose (struct DB *dbForClosing) {
@@ -879,7 +822,7 @@ int dbclose (struct DB *dbForClosing) {
 	return 0;
 }
 
-void valueGen(char * str, size_t size) {
+void value_gen(char * str, size_t size) {
 	size_t i;
 	
 	for (i = 0; i < size; i++) {
@@ -888,20 +831,20 @@ void valueGen(char * str, size_t size) {
 	
 }
 
-struct DBT * allocateDBT (size_t size) {
+struct DBT * allocate_dbt(size_t size) {
 	struct DBT *dbt = (struct DBT *)malloc(sizeof(struct DBT));
 	dbt->size = size;
 	dbt->data = (size_t *)malloc(size);
 	return dbt;
 }
 
-void freeDBT (struct DBT *ptr) {
+void free_dbt (struct DBT *ptr) {
 	free(ptr->data);
 	free(ptr);
 }
 
 
-int deleteFromBtreeLeaf (struct BTREE *x, size_t key_pos) {
+int delete_from_btree_leaf (struct BTREE *x, size_t key_pos) {
     size_t i;
     
     for (i = key_pos; i < x->n - 1 ; i++) {
@@ -914,7 +857,8 @@ int deleteFromBtreeLeaf (struct BTREE *x, size_t key_pos) {
     return 0;
 }
 
-int mergeNodes (struct DB_IMPL *db, struct BTREE *y, struct DBT *key, struct DBT *value, struct BTREE *z) {
+int merge_nodes (struct DB_IMPL *db, struct BTREE *y, struct DBT *key, 
+                                                struct DBT *value, struct BTREE *z) {
     size_t j;
 
     dbtcpy(&y->keys[db->t-1], key);
@@ -936,14 +880,18 @@ int mergeNodes (struct DB_IMPL *db, struct BTREE *y, struct DBT *key, struct DBT
     return 0;
 }
 
-void getPredecessorKey (struct DB_IMPL *db, struct BTREE *x,
+void get_predecessor_key (struct DB_IMPL *db, struct BTREE *x,
                         struct DBT *pred_key, struct DBT *pred_value) {
     if (x->leaf) {
         dbtcpy(pred_key, &x->keys[x->n - 1]);
         dbtcpy(pred_value, &x->values[x->n - 1]);
     } else {
         struct BTREE *y = readFromFile(db, x->offsetsChildren[x->n]);
-        getPredecessorKey(db, y, pred_key, pred_value);
+        if (y == NULL) {
+            perror("In get_predcessor_key function (read_from_file): ");
+            exit(1);
+        }
+        get_predecessor_key(db, y, pred_key, pred_value);
         freeNode(db, y);
     }
     
@@ -1023,13 +971,13 @@ int keysSwapLR(struct BTREE *left_child, struct BTREE *parent, size_t separator_
     return 0;
 }
 
-int isInNode (struct BTREE *x, const struct DBT *key, size_t *pos) {
+int is_in_node (struct BTREE *x, const struct DBT *key, size_t *pos) {
     size_t i = 0;
-	for(i = 0; i < x->n && memcmpwrapp2(key, &x->keys[i]) > 0; i++);
+	for(i = 0; i < x->n && memcmp_wrapper(key, &x->keys[i]) > 0; i++);
     
     *pos = i;
     
-    if (i < x->n && memcmpwrapp2(key, &x->keys[i]) == 0) {
+    if (i < x->n && memcmp_wrapper(key, &x->keys[i]) == 0) {
         return 1;
     } else {
         return 0;
@@ -1057,21 +1005,21 @@ void shiftKeys(struct BTREE *x, long pos) {
 int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key) {
     size_t pos;
     
-    if (isInNode(x, key, &pos)) {
+    if (is_in_node(x, key, &pos)) {
         size_t key_index = pos;
         
         if (x->leaf) {
-            deleteFromBtreeLeaf(x, key_index);
+            delete_from_btree_leaf(x, key_index);
             writeInFile(db, x);
             return 0;
         } else {
             struct BTREE *y = readFromFile(db, x->offsetsChildren[key_index]);
             
             if (y->n >= db->t) {
-                struct DBT *pred_key = allocateDBT((size_t)MAX_SIZE_KEY);
-                struct DBT *pred_value = allocateDBT((size_t)MAX_SIZE_VALUE);
+                struct DBT *pred_key = allocate_dbt((size_t)MAX_SIZE_KEY);
+                struct DBT *pred_value = allocate_dbt((size_t)MAX_SIZE_VALUE);
                 
-                getPredecessorKey(db, y, pred_key, pred_value);
+                get_predecessor_key(db, y, pred_key, pred_value);
                 
                 deleteFromBtree(db, y, pred_key);
                 
@@ -1080,8 +1028,8 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
                 
                 writeInFile(db, x);
                 
-                freeDBT(pred_key);
-                freeDBT(pred_value);
+                free_dbt(pred_key);
+                free_dbt(pred_value);
                 freeNode(db, y);
                 return 0;
             }
@@ -1089,8 +1037,8 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
             struct BTREE *z = readFromFile(db, x->offsetsChildren[key_index + 1]);
             
             if (z->n >= db->t) {
-                struct DBT *succ_key = allocateDBT((size_t)MAX_SIZE_KEY);
-                struct DBT *succ_value = allocateDBT((size_t)MAX_SIZE_VALUE);
+                struct DBT *succ_key = allocate_dbt((size_t)MAX_SIZE_KEY);
+                struct DBT *succ_value = allocate_dbt((size_t)MAX_SIZE_VALUE);
                 
                 getSuccessorKey(db, z, succ_key, succ_value);
                 
@@ -1101,14 +1049,14 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
                 
                 writeInFile(db, x);
                 
-                freeDBT(succ_key);
-                freeDBT(succ_value);
+                free_dbt(succ_key);
+                free_dbt(succ_value);
                 freeNode(db, y);
                 freeNode(db, z);
                 return 0;
             }
             
-            mergeNodes(db, y, &x->keys[key_index], &x->values[key_index], z);
+            merge_nodes(db, y, &x->keys[key_index], &x->values[key_index], z);
             
             removeFromFile(db, z);
             freeNode(db, z);
@@ -1194,7 +1142,7 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
             }
             
             if (subtree_index == x->n) {
-                mergeNodes(db, w, &x->keys[x->n-1], &x->values[x->n-1], y);
+                merge_nodes(db, w, &x->keys[x->n-1], &x->values[x->n-1], y);
                 
                 removeFromFile(db, y);
                 freeNode(db, y);
@@ -1228,7 +1176,7 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
                     freeNode(db, w);
                 }
                 
-                mergeNodes(db, y, &x->keys[subtree_index], &x->values[subtree_index], z);
+                merge_nodes(db, y, &x->keys[subtree_index], &x->values[subtree_index], z);
                 
                 removeFromFile(db, z);
                 freeNode(db, z);
@@ -1266,9 +1214,6 @@ int deleteFromBtree (struct DB_IMPL *db, struct BTREE *x, const struct DBT *key)
 int numKeys(struct DB_IMPL *db, struct BTREE *x) {
 	int sum = 0, temp;
 	size_t i;
-	if (x->n == 8 && x != db->root) {
-		printf("GTERRE\n");
-	}
 	if(x->leaf) {
 		return x->n;
 	}
@@ -1281,20 +1226,18 @@ int numKeys(struct DB_IMPL *db, struct BTREE *x) {
 	}
 	sum += x->n;
 	
-	
 	return  sum;
 }
 
 
 
-int deleteKey(struct DB *aux_db, const struct DBT *key) {
+int delete_key(struct DB *aux_db, const struct DBT *key) {
 	struct DB_IMPL *db = (struct DB_IMPL *)aux_db;
-	printf("CUR NUM OF BLOCKS:  %d\n", numKeys(db, db->root));
 	int ret =  deleteFromBtree(db, db->root, key);
 	return ret;
 }
 
-
+/*
 int mainForDbopen(void) {
 	
 	struct DB_IMPL * db = (struct DB_IMPL *)dbopen("database.db");
@@ -1317,7 +1260,7 @@ int mainForDbopen(void) {
 	
 	for (i = 0; i < 5; i++) {
 		memcpy(key.data, &k[i], sizeof(size_t)); 
-		g = deleteKey((struct DB *)db, &key);
+		g = delete_key((struct DB *)db, &key);
 	}
 	
 	printBTREE(db, db->root, 0, 0);
@@ -1337,13 +1280,13 @@ int mainForDbopen(void) {
 	
 	dbclose((struct DB *)db);
 	return 0;
-}
+}*/
 
 int main (int argc, char **argv) {
-	if (argc == 2 && strcmp(argv[1], "open") == 0) {
+	/*if (argc == 2 && strcmp(argv[1], "open") == 0) {
 		mainForDbopen();
 		return 0;
-	} 
+	} */
 	
 	printf("\n--------------------------------------------------\n");
 	printf("--------------- NEW RUN OF PROGRAM ---------------\n");
@@ -1368,35 +1311,30 @@ int main (int argc, char **argv) {
 	
 	key.data = (size_t *)malloc(sizeof(size_t));
 	key.size = sizeof(size_t);
-	value.data = (byte *)malloc(32);
-	value.size = 32;
-	size_t del_k[1000];
-	FILE *fp = fopen("data.txt", "r");
-	for(i = 0; i < 1000; i++) {
+	value.data = (byte *)malloc(15);
+	value.size = 15;
+	size_t del_k[100000];
+	FILE *fp = fopen("data.txt", "w");
+
+	for(i = 0; i < 100000; i++) {
 		r = rand() % 1000000000; 
 		del_k[i] = r;
-		fprintf(fp, "%lu ", del_k[i]);
-		valueGen(str, 32);
+		fscanf(fp, "%lu", &del_k[i]);
+		value_gen(str, 15);
 		memcpy(value.data, str, value.size);
 		memcpy(key.data, &del_k[i], key.size);
-		insertNode((struct DB *)myDB, &key, &value);
+		insert_key((struct DB *)myDB, &key, &value);
 	}
 	fclose(fp);
-	
-	for (i = 0; i < 1000; i++) {
+
+	for (i = 0; i < 100000; i++) {
 		memcpy(key.data, &del_k[i], key.size);
-		if (i == 230 || i == 231) {
-			//printf("sdsdsd\n");
-			//printBTREE(myDB, myDB->root, 0 ,0);
-		}
-		if (deleteKey((struct DB *)myDB, &key) < 0) {
-			//int n = searchInTree((struct DB *)myDB, &key, &value);
-			//fprintf(stderr, "N= %d\n", n);
-			printf("Problem in deleteKey: key[%lu]--> %lu\n",i, del_k[i]);
+		if (delete_key((struct DB *)myDB, &key) < 0) {
+			printf("Problem in delete_key: key[%lu]--> %lu\n",i, del_k[i]);
 		}
 	}
 	
-	printBTREE(myDB, myDB->root, 0, 0);
+	//printBTREE(myDB, myDB->root, 0, 0);
 	print_statistics(myDB);
 
 	free(key.data);
@@ -1406,4 +1344,5 @@ int main (int argc, char **argv) {
 
 	return 0;
 }
+
 

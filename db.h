@@ -10,8 +10,8 @@
 #include <time.h>
 
 
-#define MAX_SIZE_KEY 64
-#define MAX_SIZE_VALUE 128
+#define MAX_SIZE_KEY 30
+#define MAX_SIZE_VALUE 30
 #define DB_HEADER_SIZE sizeof(size_t) * 4 
 #define BYTE_SIZE 8
 #define OFFSET_SIZE 4
@@ -81,12 +81,13 @@ struct BTREE* readFromFile(struct DB_IMPL *db, size_t offset);
 struct BTREE* allocateNode(size_t t, size_t leaf);
 int writeInFile (struct DB_IMPL *db, struct BTREE *node);
 void freeNode(struct DB_IMPL *db, struct BTREE *node);
-void print_node (struct BTREE *x);
-int insertNode(struct DB *db, struct DBT *key, const struct DBT *value);
-int searchInTree(struct DB *db, struct DBT *key, struct DBT *value);
+void print_node (FILE *f, struct BTREE *x);
+int insert_key (struct DB *db, struct DBT *key, const struct DBT *value);
+int search_key(struct DB *db, struct DBT *key, struct DBT *value);
 int dbclose (struct DB *dbForClosing);
-int deleteKey(struct DB *aux_db, const struct DBT *key);
+int delete_key(struct DB *aux_db, const struct DBT *key);
 int memcmpwrapp (const struct DBT *value1, const struct DBT *value2);
+int is_in_node (struct BTREE *x, const struct DBT *key, size_t *pos);
 
 int db_close(struct DB *db);
 int db_del(struct DB *db, void *key, size_t key_len);
