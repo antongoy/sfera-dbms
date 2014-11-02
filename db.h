@@ -80,7 +80,7 @@ struct DB *dbopen(const char *file);
 struct BTREE* read_from_file(struct DB_IMPL *db, size_t offset);
 struct BTREE* allocate_node(size_t t, size_t leaf);
 int write_in_file (struct DB_IMPL *db, struct BTREE *node);
-void freeNode(struct DB_IMPL *db, struct BTREE *node);
+void free_node(struct DB_IMPL *db, struct BTREE *node);
 void print_node (struct BTREE *x);
 int insert_key (struct DB *db, struct DBT *key, const struct DBT *value);
 int search_key(struct DB *db, struct DBT *key, struct DBT *value);
