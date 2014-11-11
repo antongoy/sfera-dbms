@@ -9,6 +9,7 @@
 #include <fcntl.h>
 
 #include "db_data_structures.h"
+#include "db_cache.h"
 #include "db_io.h"
 #include "db_mem_util.h"
 #include "db_insert.h"
