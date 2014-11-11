@@ -14,6 +14,7 @@ int my_round(double f);
 int is_in_node (struct BTREE *x, const struct DBT *key, size_t *pos);
 int memcmp_wrapper (const struct DBT *value1, const struct DBT *value2);
 void dbtcpy(struct DBT *data1, const struct DBT *data2);
+void nodecpy(struct BTREE *dest, struct BTREE *src);
 
 
 #endif // _DB_UTIL_H

@@ -75,3 +75,18 @@ void dbtcpy(struct DBT *data1, const struct DBT *data2) {
     data1->size = data2->size;
     memcpy(data1->data, data2->data, data1->size);
 }
+
+void nodecpy(struct BTREE *dest, struct BTREE *src) {
+    int i;
+
+    dest->n = src->n;
+    dest->self_offset = src->self_offset;
+    dest->leaf = src->leaf;
+
+    memcpy(dest->offsets_children, src->offsets_children, sizeof(size_t) * (dest->n + 1));
+
+    for (i = 0; i < dest->n; i++) {
+        dbtcpy(&dest->keys[i], &src->keys[i]);
+        dbtcpy(&dest->values[i], &src->values[i]);
+    }
+}
