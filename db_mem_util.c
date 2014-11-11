@@ -85,3 +85,12 @@ void free_dbt (struct DBT *ptr) {
     free(ptr->data);
     free(ptr);
 }
+
+void free_htable_node(struct DB_IMPL *db, struct HTABLE_NODE *htable_node) {
+    struct CACHE_STORAGE_NODE *csn = htable_node->data->data;
+
+    free_node(db, csn->page);
+    free(csn);
+    free(htable_node->data);
+    free(htable_node);
+}

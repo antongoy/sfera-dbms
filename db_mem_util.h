@@ -9,6 +9,7 @@
 #include "db_macros.h"
 
 struct BTREE* allocate_node(size_t t, size_t leaf);
+void free_htable_node(struct DB_IMPL *db, struct HTABLE_NODE *htable_node);
 void free_node (struct DB_IMPL *db, struct BTREE *node);
 struct DBT * allocate_dbt(size_t size);
 void free_dbt (struct DBT *ptr);
