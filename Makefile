@@ -1,13 +1,13 @@
 OBJ_LIST =  db_create.c db_io.c db_mem_util.c \
             db_util.c db_insert.c db_delete.c \
-            db_search.c db_interfaces.c db_data_structures.h \
-            db_macros.h
+            db_search.c db_interfaces.c db_cache.c main.c
 ADD_FLAGS = -O3
-DEBUG_FLAG = -g
+DEBUG_FLAG = -g -O0
 SO_FLAGS = -std=c99 -shared -fPIC
+COND_COMPL = -D _CACHE_=1
   
 all: $(OBJ_LIST)
-	gcc $(ADD_FLAGS) $^  $(SO_FLAGS) -o libmydb.so
+	gcc $(DEBUG_FLAG) $^  $(SO_FLAGS) -o libmydb.so
 	
 exe:
 	gcc $(OBJ_LIST) main.c -o main
