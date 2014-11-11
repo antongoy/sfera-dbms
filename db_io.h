@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "db_data_structures.h"
+#include "db_cache.h"
 #include "db_mem_util.h"
 #include "db_util.h"
 #include "db_macros.h"
