@@ -1,4 +1,4 @@
-#include "db_сreate.h"
+#include "db_create.h"
 
 struct DB* dbcreate(const char *file, const struct DBC conf) {
     long fd;
@@ -40,6 +40,10 @@ struct DB* dbcreate(const char *file, const struct DBC conf) {
     newDB->mask = (byte *)malloc(newDB->n_blocks / 8);
     memset(newDB->mask, 0, newDB->n_blocks / 8);
 
+    size_t cache_size = conf.mem_size / conf.chunk_size;
+
+    newDB->database_cache = create_cache(cache_size);
+
     //Memory for auxiliary buffer. It is needed for writing in file
     newDB->buf = (byte *)malloc(sizeof(byte) * newDB->chunk_size);
     memset(newDB->buf, 0, newDB->chunk_size);
@@ -57,13 +61,14 @@ struct DB* dbcreate(const char *file, const struct DBC conf) {
     //Copy to buffer database metadata
     size_t k = 0;
     memcpy(metaData + k, &(newDB->cur_n_blocks), sizeof(size_t));
-    k ++;
+    k++;
     memcpy(metaData + k, &(newDB->t), sizeof(size_t));
-    k ++;
+    k++;
     memcpy(metaData + k, &(newDB->chunk_size), sizeof(size_t));
-    k ++;
+    k++;
     memcpy(metaData + k, &(newDB->n_blocks), sizeof(size_t));
-
+    k++;
+    memcpy(metaData + k, &cache_size, sizeof(size_t));
 
     //Write in file database metadata
     if(write(newDB->file_desc, metaData, DB_HEADER_SIZE) != DB_HEADER_SIZE) {
@@ -98,6 +103,7 @@ struct DB* dbcreate(const char *file, const struct DBC conf) {
 struct DB* dbopen (const char *file) {
     long fd;
     size_t i;
+    size_t cache_size;
 
     if ((fd = open(file, O_RDWR, S_IRWXU)) == -1) {
         fprintf(stderr, "In dbopen function: imposible open database\n");
@@ -113,7 +119,6 @@ struct DB* dbopen (const char *file) {
     newDB->put = &insert_key;
     newDB->get = &search_key;
     newDB->close = &dbclose;
-
 
     newDB->file_desc = fd;
 
@@ -143,6 +148,10 @@ struct DB* dbopen (const char *file) {
     memcpy(&(newDB->chunk_size), metaData + k, sizeof(size_t));
     k++;
     memcpy(&(newDB->n_blocks), metaData + k, sizeof(size_t));
+    k++;
+    memcpy(&(cache_size), metaData + k, sizeof(size_t));
+
+    newDB->database_cache = create_cache(cache_size);
 
     //Allocate memory
     newDB->buf = (byte *)malloc(sizeof(byte)*newDB->chunk_size);
