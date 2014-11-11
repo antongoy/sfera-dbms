@@ -2,8 +2,17 @@
 
 struct BTREE* read_from_file(struct DB_IMPL *db, size_t offset) {
     size_t i;
-    struct BTREE *newNode = allocate_node(db->t, 1);
+    struct BTREE *new_node = allocate_node(db->t, 1);
+#ifndef _CACHE_
+    struct LIST_NODE *list_node;
 
+    if ((list_node = find_node_in_cache(db, offset)) != NULL) {
+        nodecpy(new_node, list_node->data->page);
+        restructure_cache(db, list_node);
+
+        return new_node;
+    }
+#endif
     //Move to start position of node
     if (lseek(db->file_desc, offset, 0) < 0) {
         perror("In read_from_file function (lseek)");
@@ -18,31 +27,33 @@ struct BTREE* read_from_file(struct DB_IMPL *db, size_t offset) {
 
     //Parse the buffer. Metadata
     byte * ptr = db->buf;
-    memcpy(&newNode->self_offset, ptr, sizeof(size_t));
+    memcpy(&new_node->self_offset, ptr, sizeof(size_t));
     ptr += sizeof(size_t);
-    memcpy(&newNode->leaf, ptr, sizeof(size_t));
+    memcpy(&new_node->leaf, ptr, sizeof(size_t));
     ptr += sizeof(size_t);
-    memcpy(&newNode->n, ptr, sizeof(size_t));
+    memcpy(&new_node->n, ptr, sizeof(size_t));
     ptr += sizeof(size_t);
 
     //Parse the buffer. Offsets of children
-    memcpy(newNode->offsets_children, ptr, sizeof(size_t)*(2*db->t));
+    memcpy(new_node->offsets_children, ptr, sizeof(size_t)*(2*db->t));
     ptr +=  sizeof(size_t)*(2*db->t);
 
     //Parse the buffer. Keys and values
     int n = 2*db->t - 1;
     for(i = 0; i < n; i++) {
-        memcpy(&newNode->keys[i].size, ptr, sizeof(size_t));
+        memcpy(&new_node->keys[i].size, ptr, sizeof(size_t));
         ptr += sizeof(size_t);
-        memcpy(newNode->keys[i].data, ptr, MAX_SIZE_KEY- sizeof(size_t));
+        memcpy(new_node->keys[i].data, ptr, MAX_SIZE_KEY- sizeof(size_t));
         ptr += MAX_SIZE_KEY- sizeof(size_t);
-        memcpy(&newNode->values[i].size, ptr, sizeof(size_t));
+        memcpy(&new_node->values[i].size, ptr, sizeof(size_t));
         ptr += sizeof(size_t);
-        memcpy(newNode->values[i].data, ptr, MAX_SIZE_VALUE - sizeof(size_t));
+        memcpy(new_node->values[i].data, ptr, MAX_SIZE_VALUE - sizeof(size_t));
         ptr += MAX_SIZE_VALUE - sizeof(size_t);
     }
-
-    return newNode;
+#ifndef _CACHE_
+    insert_node_into_cache(db, new_node);
+#endif
+    return new_node;
 
 }
 
@@ -92,7 +103,13 @@ int write_in_file (struct DB_IMPL *db, struct BTREE *node) {
         }
 
     }
+#ifndef _CACHE_
+    struct LIST_NODE *list_node;
 
+    if ((list_node = find_node_in_cache(db, node->self_offset)) != NULL) {
+        refresh_node_in_cache(db, list_node, node);
+    }
+#endif
     size_t k = 0;
     memset(db->buf, 0, db->chunk_size);
 
@@ -164,5 +181,11 @@ int remove_from_file(struct DB_IMPL *db, struct BTREE *x) {
         exit(1);
     }
 
+    struct LIST_NODE *list_node;
+#ifndef _CACHE_
+    if ((list_node = find_node_in_cache(db, x->self_offset)) != NULL) {
+        delete_from_cache(db, x->self_offset);
+    }
+#endif
     return 0;
 }
