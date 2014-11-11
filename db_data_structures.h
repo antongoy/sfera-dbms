@@ -2,8 +2,12 @@
 #define _DB_DATA_STRUCTURES_H_
 
 #include <stddef.h>
+#include <sys/queue.h>
+
+#include "uthash.h"
 
 typedef char byte;
+typedef enum {NONE = 0, CHANGE, DELETE} STATE;
 
 struct DBT {
     void  *data;
@@ -26,6 +30,8 @@ struct DB_IMPL {
     int (*sync)(struct DB *db);
 
     struct BTREE *root; // Root of btree
+
+    struct CACHE *database_cache;
 
     size_t file_desc; // File descriptor which is associated with database
     size_t t; // Degree of tree nodes
@@ -51,7 +57,35 @@ struct BTREE {
 struct DBC {
     size_t db_size;
     size_t chunk_size;
-    //size_t mem_size;
+    size_t mem_size;
+};
+
+struct CACHE_STORAGE_NODE {
+    struct BTREE *page;
+    byte state;
+};
+
+struct LIST_NODE {
+    struct CACHE_STORAGE_NODE *data;
+    TAILQ_ENTRY(LIST_NODE) link;
+};
+
+struct HTABLE_NODE {
+    size_t key;
+    struct LIST_NODE *data;
+    UT_hash_handle hh;
+};
+
+TAILQ_HEAD(CACHE_LIST, LIST_NODE);
+
+struct CACHE {
+    size_t cache_size;
+    size_t cur_cache_size;
+
+    struct HTABLE_NODE *HTABLE;
+
+    struct CACHE_LIST LRU;
+
 };
 
 #endif // _DB_DATA_STRUCTURES_H_
