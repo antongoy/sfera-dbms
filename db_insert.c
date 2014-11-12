@@ -61,6 +61,14 @@ void insert_key_nonfull (struct DB_IMPL *db, struct BTREE *x,
             return;
         }
         struct BTREE *child = read_from_file(db, x->offsets_children[j]);
+
+        if (!memcmp_wrapper(&child->keys[db->t-1], key)) {
+            dbtcpy(&(child->values[db->t-1]), value);
+            write_in_file(db, child);
+            free_node(db, child);
+            return;
+        }
+
         if (child->n == 2*db->t - 1) {
             struct BTREE *newChild = split_child(db, x, child, j);
             if (memcmp_wrapper(key, &x->keys[j]) > 0) {
