@@ -199,10 +199,19 @@ struct DB* dbopen (const char *file) {
 
 int dbclose (struct DB *close_db) {
     struct DB_IMPL *db = (struct DB_IMPL *)close_db;
+    struct HTABLE_NODE *htable_node, *tmp;
+    struct LIST_NODE *list_node;
+
     free_node(db, db->root);
     free(db->mask);
     free(db->buf);
     close(db->file_desc);
+
+    HASH_ITER(hh, db->database_cache->HTABLE, htable_node, tmp) {
+        free_htable_node(db, htable_node);
+    }
+
+
     free(db);
     return 0;
 }
