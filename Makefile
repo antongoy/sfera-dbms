@@ -7,7 +7,7 @@ SO_FLAGS = -std=c99 -shared -fPIC
 COND_COMPL = -D _CACHE_=1
   
 all: $(OBJ_LIST)
-	gcc $(ADD_FLAGS) $^  $(SO_FLAGS) -o libmydb.so
+	gcc  -DHASH_FUNCTION=HASH_SFH $(ADD_FLAGS) $^  $(SO_FLAGS) -o libmydb.so
 	
 exe:
 	gcc $(OBJ_LIST) main.c -o main
